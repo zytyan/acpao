@@ -48,6 +48,8 @@ Dockerfile 提供可选 Node 镜像入口，默认普通 `node` 用户。镜像�
 
 普通主机可运行 `acpao-gateway-linux-x64 --daemon`：manager 监视 worker 并在退出后重启。Docker 容器内使用 `--foreground`，由容器 restart policy 管理整个进程。跳板连接可在配对时设置 `ACPAO_SSH_JUMP` 和 `ACPAO_SSH_TARGET`，Gateway 使用系统 `ssh -J` 建立本地转发，HTTPS/TLS 仍按中心原域名校验。该模式要求 SSH 密钥、已信任的主机指纹和目标机器上的 `ssh` 命令预先可用。不要把凭据写进启动参数和日志。
 
+有 manager 时，运行 `acpao-gateway-linux-x64 --upgrade /path/to/new-binary`。候选二进制会复制到受限版本目录并通过 `--version` 验证；worker 等待执行中的 Prompt 结束后退出，manager 启动新文件。不会重放不确定结果的 Prompt；Agent 若不支持 `session/load`，其历史会话仍需人工处理。
+
 ## 备份与恢复
 
 - **中心**：停止服务后备份整个 `.data`（数据库、必要密钥文件）；在线备份需用 SQLite 正式备份机制，不能单独拷贝 WAL 活跃时的主文件。

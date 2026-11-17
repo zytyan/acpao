@@ -108,6 +108,8 @@ export ACPAO_AGENTS='/secure/agents.json'
 
 Gateway 主动建立 WSS，无需远端公网 IP，不依赖 VPN。仅同机开发可设置 `ACPAO_INSECURE_LOCAL=1` 使用 loopback HTTP。日常运行 `./acpao-gateway-linux-x64 --daemon`，manager 会重启异常退出的 worker；Docker 中使用 `--foreground` 并设置容器 restart policy。需要 SSH 跳板时，配对前设置 `ACPAO_SSH_JUMP` 和 `ACPAO_SSH_TARGET`，后者为能访问中心地址的 SSH 目标；配置会存入设备文件，TLS 主机名仍按中心原地址校验。
 
+Gateway manager 运行时，可用 `./acpao-gateway-linux-x64 --upgrade ./新版本二进制` 暂存更新。它会等待当前 Prompt 完成，再停止旧 worker、启动新版本并通过 `session/load` 恢复可恢复的历史。升级过程中暂时不接收新指令；中心会在重连后重发尚未确认的指令。Docker 前台模式由容器编排器滚动更新。
+
 网断时本地 ACP 进程继续，关键事件持久化；重连按序号补发、中心事务去重。未确认的控制指令沿用稳定 ID 重发，Gateway 持久化执行回执，避免重复执行。Gateway **进程崩溃**时 stdio 不可恢复：启动后如实标记中断，不重放未知副作用；Agent 声明支持 `session/load` 时可以手动恢复历史并发送新的指令。
 
 主机的「身份管理」可撤销访问或轮换、下载恢复凭据。轮换立即使旧凭据失效；在目标设备先停止旧 Gateway，再执行：

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -40,6 +41,7 @@ type gateway struct {
 	ready     bool
 	cursor    int64
 	stopped   bool
+	draining  bool
 }
 
 func newGateway(c config, s *store) *gateway {
@@ -98,8 +100,24 @@ func (g *gateway) flush() {
 	}
 }
 func (g *gateway) run(ctx context.Context) error {
+	go func() {
+		<-ctx.Done()
+		g.mu.Lock()
+		socket := g.socket
+		g.mu.Unlock()
+		if socket != nil {
+			_ = socket.Close()
+		}
+	}()
 	backoff := time.Second
 	for ctx.Err() == nil {
+		g.mu.Lock()
+		draining := g.draining
+		g.mu.Unlock()
+		if draining {
+			<-ctx.Done()
+			return nil
+		}
 		err := g.connect(ctx)
 		if err != nil {
 			slog.Warn("center disconnected", "error", err)
@@ -201,6 +219,12 @@ func (g *gateway) connect(ctx context.Context) error {
 	return nil
 }
 func (g *gateway) command(id, action string, payload json.RawMessage) {
+	g.mu.Lock()
+	draining := g.draining
+	g.mu.Unlock()
+	if draining {
+		return
+	}
 	finger := fingerprint(action, payload)
 	g.store.mu.Lock()
 	old, err := g.store.receipt(id)
@@ -246,6 +270,52 @@ func (g *gateway) command(id, action string, payload json.RawMessage) {
 	close(done)
 	g.store.mu.Unlock()
 	g.result(r)
+}
+func (g *gateway) watchUpgrade(ctx context.Context, cancel context.CancelFunc, path string) {
+	self, _ := os.Executable()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			target, err := activeBinary(path)
+			if err != nil || target == self {
+				continue
+			}
+			g.mu.Lock()
+			g.draining = true
+			socket := g.socket
+			g.mu.Unlock()
+			if socket != nil {
+				_ = socket.Close()
+			}
+			for ctx.Err() == nil {
+				g.store.mu.Lock()
+				busy := len(g.executing) > 0
+				g.store.mu.Unlock()
+				g.mu.Lock()
+				for _, process := range g.processes {
+					process.mu.Lock()
+					if process.active != "" {
+						busy = true
+					}
+					process.mu.Unlock()
+				}
+				g.mu.Unlock()
+				if !busy {
+					cancel()
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(250 * time.Millisecond):
+				}
+			}
+		}
+	}
 }
 func (g *gateway) result(r receipt) {
 	_ = g.write(map[string]any{"type": "result", "id": r.ID, "status": r.Status, "result": r.Result, "error": r.Error})

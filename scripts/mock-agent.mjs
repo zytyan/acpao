@@ -48,6 +48,8 @@ const app = acp
       .map((x) => x.text)
       .join("");
     if (text === "/crash") process.exit(17);
+    if (text.startsWith("/sleep "))
+      await pause(Math.min(10000, Math.max(0, Number(text.slice(7)) || 0)));
     if (text.startsWith("/hang")) {
       await pause(60000);
       s.running = false;

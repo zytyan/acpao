@@ -54,3 +54,38 @@ test("Go Gateway pairs, runs an ACP Session and replays output to the center", {
   await new Promise<void>((done) => finalChild.once("exit", () => done()));
   child = undefined;
 });
+
+test("Go Gateway manager drains an active Prompt before staged upgrade", { skip: !process.env.GO_GATEWAY_BIN }, async (t) => {
+  const c = await setup(t);
+  const pairing = await c.app.inject({ method: "POST", url: "/api/hosts/pairings",
+    headers: { authorization: `Bearer ${adminToken}` }, payload: { name: "Go upgrade test" } });
+  const pair = pairing.json() as { code: string };
+  const response = await fetch(c.url + "/api/gateway/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: pair.code }) });
+  const identity = await response.json() as { host: string; token: string };
+  const folder = resolve(c.root, "upgrade-remote");
+  await mkdir(folder);
+  const file = resolve(folder, "config.json");
+  await writeFile(file, JSON.stringify({ center: c.url, ...identity, root: c.root, insecureLocal: true,
+    agents: [{ id: "mock", name: "Upgrade mock", command: process.execPath,
+      args: [resolve(project, "scripts/mock-agent.mjs")], env: { MOCK_LOAD: "1" } }] }));
+  const manager = spawn(process.env.GO_GATEWAY_BIN!, ["--daemon", "--config", file], { stdio: "pipe" });
+  let stderr = "";
+  manager.stderr?.on("data", (chunk) => { stderr += String(chunk); });
+  try {
+    await until(() => c.store.host(identity.host).status, (status) => status === "online", 15000).catch(() => { throw new Error(stderr); });
+    const session = await c.orchestration.create({ host: identity.host, cwd: c.root, agent: "mock" }, owner);
+    await until(() => c.store.session(session.id).status, (status) => status === "idle", 15000);
+    await c.orchestration.send({ session: session.id, text: "/sleep 5000" }, owner);
+    await until(() => c.store.session(session.id).status, (status) => status === "running", 15000);
+    const upgrade = spawn(process.env.GO_GATEWAY_BIN!, ["--config", file, "--upgrade", process.env.GO_GATEWAY_BIN!], { stdio: "pipe" });
+    await new Promise<void>((done, reject) => upgrade.once("exit", (code) => code === 0 ? done() : reject(new Error(`upgrade exited ${code}`))));
+    await until(() => c.store.host(identity.host).status, (status) => status === "offline", 15000);
+    await until(() => c.store.host(identity.host).status, (status) => status === "online", 20000);
+    await until(() => c.store.session(session.id).status, (status) => status === "idle", 20000).catch(() => { throw new Error(stderr); });
+    assert.ok(c.store.events(session.id, 0, 1000).some((event) => event.kind === "turn.end"));
+    assert.match(c.store.messages(session.id).map((message) => message.body).join(""), /sleep 5000/);
+  } finally {
+    manager.kill();
+    await new Promise<void>((done) => manager.once("exit", () => done()));
+  }
+});

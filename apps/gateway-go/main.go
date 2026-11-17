@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -34,10 +36,22 @@ func start() error {
 	foreground := flag.Bool("foreground", false, "run worker in foreground (Docker)")
 	daemon := flag.Bool("daemon", false, "run manager which restarts the worker")
 	worker := flag.Bool("worker", false, "internal manager child")
+	version := flag.Bool("version", false, "print Gateway protocol version")
+	upgrade := flag.String("upgrade", "", "stage a new Gateway executable for the manager")
 	importIdentity := flag.String("import-identity", "", "import device identity")
 	exportIdentity := flag.String("export-identity", "", "export device identity")
 	flag.Parse()
-	path := configPath(*file)
+	path, pathErr := filepath.Abs(configPath(*file))
+	if pathErr != nil {
+		return pathErr
+	}
+	if *version {
+		fmt.Println("acpao-gateway 0.2")
+		return nil
+	}
+	if *upgrade != "" {
+		return stageUpgrade(path, *upgrade)
+	}
 	if *pair {
 		return pairDevice(path)
 	}
@@ -75,6 +89,9 @@ func start() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	defer g.stop()
+	if *worker {
+		go g.watchUpgrade(ctx, stop, path)
+	}
 	slog.Info("gateway started", "host", c.Host, "mode", func() string {
 		if *worker {
 			return "worker"
@@ -195,13 +212,13 @@ func transferIdentity(configFile, identityFile string, export bool) error {
 	return os.Rename(temp, configFile)
 }
 func supervise(path string) error {
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	for ctx.Err() == nil {
+		self, err := activeBinary(path)
+		if err != nil {
+			return err
+		}
 		cmd := exec.CommandContext(ctx, self, "--worker", "--config", path)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -217,5 +234,59 @@ func supervise(path string) error {
 		case <-time.After(2 * time.Second):
 		}
 	}
+	return nil
+}
+
+func activeFile(path string) string { return filepath.Join(filepath.Dir(path), "active-binary") }
+func activeBinary(path string) (string, error) {
+	data, err := os.ReadFile(activeFile(path))
+	if errors.Is(err, os.ErrNotExist) {
+		return os.Executable()
+	}
+	if err != nil {
+		return "", err
+	}
+	target := strings.TrimSpace(string(data))
+	if target == "" {
+		return "", errors.New("empty active-binary file")
+	}
+	return target, nil
+}
+func stageUpgrade(path, candidate string) error {
+	source, err := os.ReadFile(candidate)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(source)
+	suffix := ""
+	if strings.HasSuffix(strings.ToLower(candidate), ".exe") {
+		suffix = ".exe"
+	}
+	directory := filepath.Join(filepath.Dir(path), "versions")
+	if err = os.MkdirAll(directory, 0700); err != nil {
+		return err
+	}
+	target := filepath.Join(directory, "gateway-"+hex.EncodeToString(sum[:12])+suffix)
+	if err = os.WriteFile(target, source, 0700); err != nil {
+		return err
+	}
+	if err = os.Chmod(target, 0700); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	check := exec.CommandContext(ctx, target, "--version")
+	hideWorkerWindow(check)
+	if err = check.Run(); err != nil {
+		return fmt.Errorf("candidate cannot start: %w", err)
+	}
+	temp := activeFile(path) + ".new"
+	if err = os.WriteFile(temp, []byte(target+"\n"), 0600); err != nil {
+		return err
+	}
+	if err = os.Rename(temp, activeFile(path)); err != nil {
+		return err
+	}
+	fmt.Println("Upgrade staged; manager will restart the worker after active Prompts finish.")
 	return nil
 }
