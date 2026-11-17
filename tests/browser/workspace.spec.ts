@@ -67,6 +67,11 @@ test("login → bootstrap → streamed workspace → delegation → approval →
   await page.getByLabel("主机名称").fill("Linux 测试主机");
   await page.getByRole("button", { name: "生成一次性配对码" }).click();
   await expect(page.locator(".pair-result pre")).toContainText("ACPAO_PAIR_CODE");
+  await expect(page.locator(".pair-result pre")).toContainText("acpao-gateway-linux-x64");
+  await page.locator(".pair-result select").selectOption("windows-x64");
+  await expect(page.locator(".pair-result pre")).toContainText("acpao-gateway-windows-x64.exe");
+  await page.getByLabel("中心地址", { exact: true }).fill("https://acp.example.com/");
+  await expect(page.locator(".pair-result pre")).toContainText("ACPAO_CENTER='https://acp.example.com'");
   await page.getByRole("button", { name: "完成", exact: true }).click();
   await page.getByRole("link", { name: "工作区", exact: true }).click();
   await expect(page.locator(".message.assistant").last()).toContainText("测试委派结果");

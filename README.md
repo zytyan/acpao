@@ -106,7 +106,7 @@ export ACPAO_AGENTS='/secure/agents.json'
 
 设备身份保存在 `.gateway/config.json`（0600），执行日志与 Session 关联保存在 `.gateway/gateway-go.sqlite`。若首次未提供 Agent 配置，在 `config.json` 中填写 `agents` 后重启 Gateway。Gateway 只使用本机配置中的可执行程序；中心无法通过远程指令替换它。
 
-Gateway 主动建立 WSS，无需远端公网 IP，不依赖 VPN。仅同机开发可设置 `ACPAO_INSECURE_LOCAL=1` 使用 loopback HTTP。日常运行 `./acpao-gateway-linux-x64 --daemon`，manager 会重启异常退出的 worker；Docker 中使用 `--foreground` 并设置容器 restart policy。需要 SSH 跳板时，配对前设置 `ACPAO_SSH_JUMP` 和 `ACPAO_SSH_TARGET`，后者为能访问中心地址的 SSH 目标；配置会存入设备文件，TLS 主机名仍按中心原地址校验。
+Gateway 主动建立 WSS，无需远端公网 IP，不依赖 VPN。仅同机开发可设置 `ACPAO_INSECURE_LOCAL=1` 使用 loopback HTTP。日常运行 `./acpao-gateway-linux-x64 --daemon`，命令会返回终端并启动后台 manager；manager 会重启异常退出的 worker。使用 `--stop` 结束后台 manager。Docker 中使用 `--foreground` 并设置容器 restart policy。需要 SSH 跳板时，配对前设置 `ACPAO_SSH_JUMP` 和 `ACPAO_SSH_TARGET`，后者为能访问中心地址的 SSH 目标；配置会存入设备文件，TLS 主机名仍按中心原地址校验。
 
 Gateway manager 运行时，可用 `./acpao-gateway-linux-x64 --upgrade ./新版本二进制` 暂存更新。它会等待当前 Prompt 完成，再停止旧 worker、启动新版本并通过 `session/load` 恢复可恢复的历史。升级过程中暂时不接收新指令；中心会在重连后重发尚未确认的指令。Docker 前台模式由容器编排器滚动更新。
 

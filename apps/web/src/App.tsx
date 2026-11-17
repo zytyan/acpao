@@ -79,6 +79,8 @@ export default function App() {
     [title, setTitle] = useState(""),
     [isolate, setIsolate] = useState(false),
     [pairName, setPairName] = useState(""),
+    [pairCenter, setPairCenter] = useState(location.origin),
+    [pairPlatform, setPairPlatform] = useState<"linux-x64" | "linux-arm64" | "windows-x64">("linux-x64"),
     [pair, setPair] = useState<{ code: string; host: string } | null>(null),
     [diagnostics, setDiagnostics] = useState<DiagnosticData | null>(null),
     [logSearch, setLogSearch] = useState(""),
@@ -107,6 +109,14 @@ export default function App() {
   const host = hosts.find((h) => h.id === hostId);
   const currentSession = sessions.find((s) => s.id === sessionId);
   const isWorkspace = route === "/workspace";
+  const pairCenterOrigin = (() => {
+    try { return new URL(pairCenter).origin; } catch { return ""; }
+  })();
+  const pairCommand = pair
+    ? pairPlatform === "windows-x64"
+      ? `Invoke-WebRequest 'https://github.com/zytyan/acpao/releases/download/v0.2.0/acpao-gateway-windows-x64.exe' -OutFile acpao-gateway.exe\n$env:ACPAO_CENTER='${pairCenterOrigin}'\n$env:ACPAO_PAIR_CODE='${pair.code}'\n$env:ACPAO_ROOT='.'\n./acpao-gateway.exe --pair\n./acpao-gateway.exe --daemon`
+      : `curl -fL 'https://github.com/zytyan/acpao/releases/download/v0.2.0/acpao-gateway-${pairPlatform}' -o acpao-gateway\nchmod +x acpao-gateway\nexport ACPAO_CENTER='${pairCenterOrigin}'\nexport ACPAO_PAIR_CODE='${pair.code}'\nexport ACPAO_ROOT='.'\n./acpao-gateway --pair\n./acpao-gateway --daemon`
+    : "";
   const refresh = useCallback(async () => {
     try {
       const [hs, ss, cf] = await Promise.all([
@@ -1299,7 +1309,7 @@ export default function App() {
               }}
             >
               <p className="modal-description">
-                在目标 Linux 主机运行 Gateway。它会主动连接中心，无需目标主机拥有公网 IP。
+                在目标设备运行 Go Gateway。它会主动连接中心，无需设备拥有公网 IP。
               </p>
               <label>
                 主机名称
@@ -1311,10 +1321,17 @@ export default function App() {
                   maxLength={100}
                 />
               </label>
-              <p className="hint">
-                先在目标主机安装 Node.js 24，复制此项目并运行 npm ci。中心需要可访问的 HTTPS
-                地址。SSH 自动部署尚未实现。
-              </p>
+              <label>目标设备
+                <select value={pairPlatform} onChange={(event) => setPairPlatform(event.target.value as typeof pairPlatform)}>
+                  <option value="linux-x64">Linux x64</option>
+                  <option value="linux-arm64">Linux ARM64</option>
+                  <option value="windows-x64">Windows x64</option>
+                </select>
+              </label>
+              <label>目标设备可访问的中心地址
+                <input type="url" value={pairCenter} onChange={(event) => setPairCenter(event.target.value)} required placeholder="https://acp.example.com" />
+              </label>
+              <p className="hint">无需在设备上安装 Node.js。中心需要可访问的 HTTPS 地址。</p>
               <div className="form-actions">
                 <button className="button primary">
                   生成一次性配对码
@@ -1324,14 +1341,21 @@ export default function App() {
             </form>
           ) : (
             <div className="pair-result">
-              <p>在目标主机的项目目录运行以下命令。配对码 10 分钟有效，只能使用一次。</p>
-              <pre>{`export ACPAO_CENTER='${location.origin}'\nexport ACPAO_PAIR_CODE='${pair.code}'\nexport ACPAO_ROOT='/your/project'\nnpm run gateway -- --pair`}</pre>
-              <Copy
-                text={`export ACPAO_CENTER='${location.origin}'\nexport ACPAO_PAIR_CODE='${pair.code}'\nexport ACPAO_ROOT='/your/project'\nnpm run gateway -- --pair`}
-              />
+              <p>先进入目标工作目录，再运行以下命令。配对码 10 分钟有效，只能使用一次。</p>
+              <label>目标设备
+                <select value={pairPlatform} onChange={(event) => setPairPlatform(event.target.value as typeof pairPlatform)}>
+                  <option value="linux-x64">Linux x64</option>
+                  <option value="linux-arm64">Linux ARM64</option>
+                  <option value="windows-x64">Windows x64</option>
+                </select>
+              </label>
+              <label>中心地址
+                <input type="url" value={pairCenter} onChange={(event) => setPairCenter(event.target.value)} placeholder="https://acp.example.com" />
+              </label>
+              <pre>{pairCommand}</pre>
+              <Copy text={pairCommand} />
               <p className="hint">
-                同机开发测试可显式设置 ACPAO_INSECURE_LOCAL=1。配对后在 .gateway/config.json 的
-                agents 中配置 Agent，再重启 Gateway。配置文件包含设备凭据，请限制访问。
+                配对后在 .gateway/config.json 的 agents 中配置本机 ACP Agent，再运行 `--stop` 和 `--daemon` 重启 Gateway。配置文件包含设备凭据，请限制访问。
               </p>
               <button
                 className="button primary"
@@ -1521,7 +1545,7 @@ export default function App() {
         <Modal title="保存新的设备身份" onClose={() => setRecovery(null)}>
           <p className="modal-description">{recovery.warning}</p>
           <p>
-            在目标设备停止 Gateway 后，运行 npm run gateway -- --import-identity
+            在目标设备停止 Gateway 后，运行 acpao-gateway --import-identity
             /安全路径/identity.json。该操作保留原有工作目录、Agent 配置和本地记录。
           </p>
           <p className="hint">请将文件保存在安全位置；获得它的人可以冒充该设备。</p>
