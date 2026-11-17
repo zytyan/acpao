@@ -330,6 +330,7 @@ func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireErr
 		Isolate  bool            `json:"isolate"`
 		Approval string          `json:"approval"`
 		Option   string          `json:"option"`
+		Command  string          `json:"command"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return fail("INVALID_COMMAND", "Invalid command payload")
@@ -387,6 +388,11 @@ func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireErr
 	process := g.processes[key]
 	g.mu.Unlock()
 	switch action {
+	case "promote":
+		if process == nil {
+			return fail("SESSION_UNAVAILABLE", "ACP process is not connected")
+		}
+		return process.promote(payload.Command)
 	case "send":
 		if process == nil {
 			return fail("SESSION_UNAVAILABLE", "ACP process is not connected")
@@ -433,6 +439,7 @@ func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireErr
 			if mode == "steer" {
 				command.Status = "failed"
 				_ = g.store.put("command", id, command)
+				g.emit(key, "queue.cancelled", map[string]string{"command": id, "status": "failed"})
 				return fail("STEERING_NOT_APPLIED", "Agent did not accept steering")
 			}
 		}
@@ -446,6 +453,7 @@ func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireErr
 		if process == nil {
 			return map[string]string{"status": s.Status}, nil
 		}
+		process.cancelQueue()
 		process.mu.Lock()
 		active := process.active
 		process.mu.Unlock()
@@ -462,6 +470,7 @@ func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireErr
 		return map[string]string{"status": "cancelling"}, nil
 	case "close":
 		if process != nil {
+			process.cancelQueue()
 			process.stop()
 		}
 		g.updateSession(&s, "closed", "")
@@ -492,6 +501,7 @@ func (g *gateway) recoverSessions() {
 		if json.Unmarshal(item, &command) == nil && (command.Status == "running" || command.Status == "queued") {
 			command.Status = "interrupted"
 			_ = g.store.put("command", command.ID, command)
+			g.emit(command.Session, "queue.cancelled", map[string]string{"command": command.ID, "status": "interrupted"})
 		}
 	}
 	raw, _ = g.store.all("session")

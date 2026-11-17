@@ -249,6 +249,7 @@ func (p *acpProcess) runPrompt(command queuedCommand) {
 	p.gateway.updateSession(p.session, "running", "")
 	command.Status = "running"
 	_ = p.gateway.store.put("command", command.ID, command)
+	p.gateway.emit(p.session.ID, "turn.start", map[string]string{"command": command.ID})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	var result struct {
@@ -279,6 +280,7 @@ func (p *acpProcess) runPrompt(command queuedCommand) {
 		for _, queued := range p.queue {
 			queued.Status = "interrupted"
 			_ = p.gateway.store.put("command", queued.ID, queued)
+			p.gateway.emit(p.session.ID, "queue.cancelled", map[string]string{"command": queued.ID, "status": "interrupted"})
 		}
 		p.queue = nil
 	}
@@ -286,6 +288,73 @@ func (p *acpProcess) runPrompt(command queuedCommand) {
 	if next != nil {
 		p.startPrompt(*next)
 	}
+}
+func (p *acpProcess) cancelQueue() {
+	p.mu.Lock()
+	queue := p.queue
+	p.queue = nil
+	p.mu.Unlock()
+	for _, command := range queue {
+		command.Status = "cancelled"
+		_ = p.gateway.store.put("command", command.ID, command)
+		p.gateway.emit(p.session.ID, "queue.cancelled", map[string]string{"command": command.ID, "status": "cancelled"})
+	}
+}
+func (p *acpProcess) promote(commandID string) (any, *wireError) {
+	p.mu.Lock()
+	index := -1
+	for i, command := range p.queue {
+		if command.ID == commandID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		p.mu.Unlock()
+		return fail("COMMAND_NOT_QUEUED", "Message is no longer queued")
+	}
+	if p.active == "" || !p.session.Capabilities.Steering {
+		p.mu.Unlock()
+		return fail("STEERING_UNSUPPORTED", "No running turn can accept steering")
+	}
+	command := p.queue[index]
+	p.queue = append(p.queue[:index], p.queue[index+1:]...)
+	p.mu.Unlock()
+	command.Status = "steering"
+	_ = p.gateway.store.put("command", command.ID, command)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var response struct {
+		Outcome string `json:"outcome"`
+	}
+	err := p.request(ctx, "_session/steering", map[string]any{"sessionId": p.session.ACPID, "prompt": []any{map[string]string{"type": "text", "text": command.Text}}, "_meta": map[string]any{"steering": map[string]string{"idleBehavior": "promptRequired"}}}, &response)
+	if err == nil && response.Outcome == "injected" {
+		command.Status = "completed"
+		_ = p.gateway.store.put("command", command.ID, command)
+		p.gateway.emit(p.session.ID, "steered", map[string]string{"command": command.ID})
+		return map[string]any{"session": p.session.ID, "command": command.ID, "delivery": "steering", "status": p.session.Status}, nil
+	}
+	command.Status = "queued"
+	_ = p.gateway.store.put("command", command.ID, command)
+	p.mu.Lock()
+	if index > len(p.queue) {
+		index = len(p.queue)
+	}
+	p.queue = append(p.queue, queuedCommand{})
+	copy(p.queue[index+1:], p.queue[index:])
+	p.queue[index] = command
+	idle := p.active == ""
+	var next *queuedCommand
+	if idle && len(p.queue) > 0 {
+		first := p.queue[0]
+		next = &first
+		p.queue = p.queue[1:]
+	}
+	p.mu.Unlock()
+	if next != nil {
+		p.startPrompt(*next)
+	}
+	return map[string]any{"session": p.session.ID, "command": command.ID, "delivery": "queued", "status": p.session.Status, "reason": "notInjected"}, nil
 }
 func (p *acpProcess) stop() {
 	p.mu.Lock()

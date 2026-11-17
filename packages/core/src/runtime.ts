@@ -7,7 +7,12 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Store, id } from "./store.js";
 import { agentEnvironment } from "./agent-command.js";
-import { detectExtensions, SteeringRequest, SteeringResponse, STEERING_METHOD } from "./acp-extensions.js";
+import {
+  detectExtensions,
+  SteeringRequest,
+  SteeringResponse,
+  STEERING_METHOD,
+} from "./acp-extensions.js";
 import { AppError, type Session, type AgentConfig, type Command, type Approval } from "./types.js";
 interface Slot {
   process: ChildProcessWithoutNullStreams;
@@ -52,13 +57,21 @@ export class Runtime {
         processId: undefined,
         error: "执行端已重启；未自动重放正在执行的指令。",
       });
-    for (const c of store.commands().filter((c) => ["running", "queued", "steering"].includes(c.status)))
+    for (const c of store
+      .commands()
+      .filter(
+        (c) =>
+          store.get<Session>("session", c.session)?.host === options.host &&
+          ["running", "queued", "steering"].includes(c.status),
+      ))
       store.command({ ...c, status: "interrupted" });
     for (const a of store.approvals()) store.approval({ ...a, status: "cancelled" });
     if (options.autoRecover) {
       const timer = setTimeout(() => {
         if (this.stopping) return;
-        for (const session of store.sessions().filter((s) => s.host === options.host && s.status === "interrupted"))
+        for (const session of store
+          .sessions()
+          .filter((s) => s.host === options.host && s.status === "interrupted"))
           this.scheduleRecovery(session.id);
       }, 250);
       timer.unref();
@@ -68,22 +81,39 @@ export class Runtime {
     if (this.stopping || !this.options.autoRecover || this.recovery.has(key)) return;
     const session = this.store.session(key);
     if (!session.acpId || !session.capabilities?.load || session.status === "closed") return;
-    const timer = setTimeout(() => {
-      this.recovery.delete(key);
-      if (this.stopping) return;
-      const current = this.store.session(key);
-      if (current.status === "closed" || this.slots.has(key)) return;
-      const config = this.store.get<AgentConfig>("session-agent", key);
-      if (!config) return;
-      void this.resume(key, config).then(() => {
-        this.store.diagnostic({ level: "info", source: "acp", code: "ACP_RECOVERED",
-          message: "已重新连接 Agent 并加载历史会话；中断的 Prompt 未重放", session: key, agent: config.id });
-      }).catch((error) => {
-        this.store.diagnostic({ level: "warning", source: "acp", code: "ACP_RECOVERY_FAILED",
-          message: error instanceof Error ? error.message : "历史恢复失败", session: key, agent: config.id });
-        if (attempt < 2) this.scheduleRecovery(key, attempt + 1);
-      });
-    }, Math.min(1000 * 2 ** attempt, 8000));
+    const timer = setTimeout(
+      () => {
+        this.recovery.delete(key);
+        if (this.stopping) return;
+        const current = this.store.session(key);
+        if (current.status === "closed" || this.slots.has(key)) return;
+        const config = this.store.get<AgentConfig>("session-agent", key);
+        if (!config) return;
+        void this.resume(key, config)
+          .then(() => {
+            this.store.diagnostic({
+              level: "info",
+              source: "acp",
+              code: "ACP_RECOVERED",
+              message: "已重新连接 Agent 并加载历史会话；中断的 Prompt 未重放",
+              session: key,
+              agent: config.id,
+            });
+          })
+          .catch((error) => {
+            this.store.diagnostic({
+              level: "warning",
+              source: "acp",
+              code: "ACP_RECOVERY_FAILED",
+              message: error instanceof Error ? error.message : "历史恢复失败",
+              session: key,
+              agent: config.id,
+            });
+            if (attempt < 2) this.scheduleRecovery(key, attempt + 1);
+          });
+      },
+      Math.min(1000 * 2 ** attempt, 8000),
+    );
     timer.unref();
     this.recovery.set(key, timer);
   }
@@ -134,11 +164,18 @@ export class Runtime {
     const s = this.store.session(key);
     this.store.updateSession(key, { status: "creating", error: undefined });
     this.store.diagnostic({
-      level: "info", source: "agent", code: "ACP_START", message: `启动 ${config.command}`,
-      session: key, agent: config.id,
+      level: "info",
+      source: "agent",
+      code: "ACP_START",
+      message: `启动 ${config.command}`,
+      session: key,
+      agent: config.id,
     });
     const secretValues = Object.entries({ ...process.env, ...config.env })
-      .filter(([name, value]) => /(?:TOKEN|SECRET|PASSWORD|API_KEY|AUTH)/i.test(name) && !!value && value.length >= 6)
+      .filter(
+        ([name, value]) =>
+          /(?:TOKEN|SECRET|PASSWORD|API_KEY|AUTH)/i.test(name) && !!value && value.length >= 6,
+      )
       .map(([, value]) => value!);
     const redact = (message: string) => {
       let text = message;
@@ -159,7 +196,14 @@ export class Runtime {
         const line = index >= 0 ? stderrBuffer.slice(0, index) : stderrBuffer;
         stderrBuffer = index >= 0 ? stderrBuffer.slice(index + 1) : "";
         const safe = redact(line).slice(0, 8192);
-        this.store.diagnostic({ level: "warning", source: "agent", code: "AGENT_STDERR", message: safe, session: key, agent: config.id });
+        this.store.diagnostic({
+          level: "warning",
+          source: "agent",
+          code: "AGENT_STDERR",
+          message: safe,
+          session: key,
+          agent: config.id,
+        });
         this.options.onStderr?.(key, safe + "\n");
       }
     };
@@ -198,7 +242,14 @@ export class Runtime {
       if (slot.stopping) return;
       const wasReady = slot.ready;
       flushStderr(true);
-      this.store.diagnostic({ level: "error", source: "agent", code: "ACP_EXIT", message: `Agent 进程或 ACP 连接已退出${child.exitCode === null ? "" : `，退出码 ${child.exitCode}`}`, session: key, agent: config.id });
+      this.store.diagnostic({
+        level: "error",
+        source: "agent",
+        code: "ACP_EXIT",
+        message: `Agent 进程或 ACP 连接已退出${child.exitCode === null ? "" : `，退出码 ${child.exitCode}`}`,
+        session: key,
+        agent: config.id,
+      });
       slot.stopping = true;
       this.resolvePermissions(key);
       this.slots.delete(key);
@@ -273,13 +324,27 @@ export class Runtime {
       }
       if (slot.stopping) throw new AppError("AGENT_EXITED", "Agent 初始化时退出");
       this.options.onStage?.(key, "session");
-      this.store.diagnostic({ level: "info", source: "agent", code: "ACP_READY", message: "ACP 会话已创建", session: key, agent: config.id });
+      this.store.diagnostic({
+        level: "info",
+        source: "agent",
+        code: "ACP_READY",
+        message: "ACP 会话已创建",
+        session: key,
+        agent: config.id,
+      });
       slot.ready = true;
       this.store.updateSession(key, { status: "idle", error: undefined });
       this.pump();
     } catch (e) {
       flushStderr(true);
-      this.store.diagnostic({ level: "error", source: "agent", code: "ACP_CONNECT_FAILED", message: redact(e instanceof Error ? e.message : "ACP 连接失败"), session: key, agent: config.id });
+      this.store.diagnostic({
+        level: "error",
+        source: "agent",
+        code: "ACP_CONNECT_FAILED",
+        message: redact(e instanceof Error ? e.message : "ACP 连接失败"),
+        session: key,
+        agent: config.id,
+      });
       this.stopSlot(key);
       this.store.updateSession(key, {
         status: "error",
@@ -341,8 +406,13 @@ export class Runtime {
       throw new AppError("SESSION_UNAVAILABLE", "会话当前不可用，请恢复或创建会话", 409);
     const busy = !!slot.active || this.store.commands(key, "queued").length > 0;
     if (mode === "steer" && (!s.capabilities?.steering || !slot.active))
-      throw new AppError("STEERING_UNSUPPORTED", !s.capabilities?.steering
-        ? "此 Agent 未声明支持 Steering" : "当前没有可引导的执行，请正常发送 Prompt", 409);
+      throw new AppError(
+        "STEERING_UNSUPPORTED",
+        !s.capabilities?.steering
+          ? "此 Agent 未声明支持 Steering"
+          : "当前没有可引导的执行，请正常发送 Prompt",
+        409,
+      );
     if (mode === "immediate" && (busy || this.runningCount() >= (this.options.maxConcurrent ?? 4)))
       throw new AppError("SESSION_BUSY", "当前无法立即执行", 409);
     if (this.store.commands(key, "queued").length >= 100)
@@ -364,7 +434,8 @@ export class Runtime {
         });
       this.store.event(key, "queued", { command: requestId, text });
     });
-    const shouldSteer = !!slot.active && s.capabilities?.steering && (mode === "steer" || mode === "auto");
+    const shouldSteer =
+      !!slot.active && s.capabilities?.steering && (mode === "steer" || mode === "auto");
     if (shouldSteer) {
       return this.promote(key, requestId, mode === "steer");
     }
@@ -388,11 +459,13 @@ export class Runtime {
     this.store.command({ ...command, status: "steering" });
     try {
       const params = SteeringRequest.parse({
-        sessionId: session.acpId!, prompt: [{ type: "text", text: command.text }],
+        sessionId: session.acpId!,
+        prompt: [{ type: "text", text: command.text }],
         _meta: { steering: { idleBehavior: "promptRequired" } },
       });
       const raw = await slot.connection.agent.request(STEERING_METHOD, params, {
-        cancellationSignal: AbortSignal.timeout(15000), stopWaitingOnCancel: true,
+        cancellationSignal: AbortSignal.timeout(15000),
+        stopWaitingOnCancel: true,
       });
       const response = SteeringResponse.parse(raw);
       if (response.outcome === "injected") {
@@ -402,17 +475,36 @@ export class Runtime {
       }
       this.store.command({ ...command, status: strict ? "failed" : "queued" });
       if (!strict) this.pump();
-      if (strict) throw new AppError("STEERING_NOT_APPLIED", "Agent 未接收引导；请使用普通发送或排队", 409);
-      return { session: key, command: commandId, delivery: "queued", status: session.status, reason: response.outcome };
+      if (strict)
+        throw new AppError("STEERING_NOT_APPLIED", "Agent 未接收引导；请使用普通发送或排队", 409);
+      return {
+        session: key,
+        command: commandId,
+        delivery: "queued",
+        status: session.status,
+        reason: response.outcome,
+      };
     } catch (error) {
       if (this.store.get<Command>("command", commandId)?.status === "steering")
         this.store.command({ ...command, status: strict ? "failed" : "queued" });
-      this.store.diagnostic({ level: "warning", source: "acp", code: "STEERING_FAILED",
-        message: error instanceof Error ? error.message : "ACP 引导请求失败", session: key, agent: session.agent });
+      this.store.diagnostic({
+        level: "warning",
+        source: "acp",
+        code: "STEERING_FAILED",
+        message: error instanceof Error ? error.message : "ACP 引导请求失败",
+        session: key,
+        agent: session.agent,
+      });
       if (!strict) this.pump();
       if (error instanceof AppError) throw error;
       if (strict) throw new AppError("STEERING_FAILED", "ACP 引导请求失败，请检查诊断记录", 409);
-      return { session: key, command: commandId, delivery: "queued", status: session.status, reason: "failed" };
+      return {
+        session: key,
+        command: commandId,
+        delivery: "queued",
+        status: session.status,
+        reason: "failed",
+      };
     }
   }
   private runningCount() {
@@ -427,6 +519,7 @@ export class Runtime {
         slot.active = c.id;
         slot.cancelled = false;
         this.store.command({ ...c, status: "running" });
+        this.store.event(c.session, "turn.start", { command: c.id });
         this.store.updateSession(c.session, {
           status: "running",
           error: undefined,
@@ -536,8 +629,10 @@ export class Runtime {
     for (const [a, p] of this.pending) if (p.session === key) this.decide(a);
   }
   private discardQueue(key: string) {
-    for (const c of this.store.commands(key, "queued"))
+    for (const c of this.store.commands(key, "queued")) {
       this.store.command({ ...c, status: "cancelled" });
+      this.store.event(key, "queue.cancelled", { command: c.id, status: "cancelled" });
+    }
   }
   async cancel(key: string) {
     const slot = this.slots.get(key);

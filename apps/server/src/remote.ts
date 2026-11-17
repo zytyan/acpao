@@ -9,6 +9,7 @@ import {
   type Session,
   type Event,
   type Approval,
+  type Command,
 } from "../../../packages/core/src/types.js";
 import type * as acp from "@agentclientprotocol/sdk";
 const Hello = z.object({
@@ -184,6 +185,29 @@ export class RemoteHub {
       if (e.kind === "queued" && s) {
         const d = e.data as { command: string; text: string };
         this.store.message(s.id, "user", d.command, d.text);
+        this.store.command({
+          id: d.command,
+          session: s.id,
+          text: d.text,
+          status: "queued",
+          createdAt: e.createdAt,
+        });
+      }
+      if (["turn.start", "turn.end", "steered", "queue.cancelled"].includes(e.kind) && s) {
+        const d = e.data as { command: string; status?: Command["status"]; stopReason?: string };
+        const command = this.store.get<Command>("command", d.command);
+        if (command?.session === s.id)
+          this.store.command({
+            ...command,
+            status:
+              e.kind === "turn.start"
+                ? "running"
+                : e.kind === "queue.cancelled"
+                  ? (d.status ?? "cancelled")
+                  : d.stopReason === "cancelled"
+                    ? "cancelled"
+                    : "completed",
+          });
       }
       if (e.kind === "acp.update" && s) {
         const { run, update } = e.data as {
