@@ -1536,6 +1536,70 @@ dialog::backdrop {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.diagnostic-settings,
+.diagnostic-filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.diagnostic-settings strong {
+  font-size: 12px;
+}
+.diagnostic-settings p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.diagnostic-settings input {
+  accent-color: var(--accent);
+}
+.diagnostic-filters input {
+  flex: 1;
+  min-width: 0;
+}
+.diagnostic-filters select {
+  width: 90px;
+}
+.diagnostic-list {
+  height: min(48dvh, 500px);
+  overflow-y: auto;
+  margin: 10px -8px;
+  padding: 0 8px;
+}
+.diagnostic-entry {
+  border-bottom: 1px solid var(--line);
+  padding: 8px 0;
+}
+.diagnostic-entry summary {
+  display: grid;
+  grid-template-columns: 118px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  font-size: 11px;
+}
+.diagnostic-entry summary span,
+.diagnostic-entry summary small,
+.diagnostic-entry p {
+  color: var(--muted);
+  font-size: 10px;
+}
+.diagnostic-entry.error summary strong {
+  color: var(--danger);
+}
+.diagnostic-entry pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px;
+  background: var(--code);
+  font-size: 11px;
+}
+.diagnostic-entry p {
+  margin: 0 0 4px;
+}
 .pair-result > .button {
   margin-top: 10px;
   width: 100%;

@@ -53,6 +53,22 @@ export interface ChatData {
     status: string;
     agent: string;
   }[];
+  queued?: number;
+}
+export interface Diagnostic {
+  id: number;
+  createdAt: number;
+  level: "info" | "warning" | "error";
+  source: string;
+  code: string;
+  message: string;
+  session?: string;
+  agent?: string;
+}
+export interface DiagnosticData {
+  logs: Diagnostic[];
+  retentionDays: number;
+  testFeatures: boolean;
 }
 export async function api<T>(path: string, body?: unknown, method?: string): Promise<T> {
   const r = await fetch(`/api${path}`, {

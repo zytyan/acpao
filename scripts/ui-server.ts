@@ -9,6 +9,7 @@ const { app } = await createApp({
   adminToken: "browser-test-admin-secret-123456",
   launchToken: "browser-test-launch-token-123456",
   demo: false,
+  testFeatures: true,
 });
 await app.listen({ host: "127.0.0.1", port: 4317 });
 let stop = false;

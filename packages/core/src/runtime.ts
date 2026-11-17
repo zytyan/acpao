@@ -99,6 +99,18 @@ export class Runtime {
       );
     const s = this.store.session(key);
     this.store.updateSession(key, { status: "creating", error: undefined });
+    this.store.diagnostic({
+      level: "info", source: "agent", code: "ACP_START", message: `启动 ${config.command}`,
+      session: key, agent: config.id,
+    });
+    const secretValues = Object.entries({ ...process.env, ...config.env })
+      .filter(([name, value]) => /(?:TOKEN|SECRET|PASSWORD|API_KEY|AUTH)/i.test(name) && !!value && value.length >= 6)
+      .map(([, value]) => value!);
+    const redact = (message: string) => {
+      let text = message;
+      for (const value of secretValues) text = text.replaceAll(value, "[已隐藏]");
+      return text.replace(/Bearer\s+\S+/gi, "Bearer [已隐藏]");
+    };
     const child = spawn(config.command, config.args, {
       cwd: s.cwd,
       env: agentEnvironment(config.env, process.env, process.platform),
@@ -106,7 +118,22 @@ export class Runtime {
       detached: process.platform !== "win32",
     });
     // Drain stderr without copying possibly sensitive agent diagnostics into logs.
-    child.stderr.on("data", (chunk: Buffer) => this.options.onStderr?.(key, chunk.toString("utf8")));
+    let stderrBuffer = "";
+    const flushStderr = (final = false) => {
+      let index;
+      while ((index = stderrBuffer.indexOf("\n")) >= 0 || (final && stderrBuffer.length)) {
+        const line = index >= 0 ? stderrBuffer.slice(0, index) : stderrBuffer;
+        stderrBuffer = index >= 0 ? stderrBuffer.slice(index + 1) : "";
+        const safe = redact(line).slice(0, 8192);
+        this.store.diagnostic({ level: "warning", source: "agent", code: "AGENT_STDERR", message: safe, session: key, agent: config.id });
+        this.options.onStderr?.(key, safe + "\n");
+      }
+    };
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrBuffer = (stderrBuffer + chunk.toString("utf8")).slice(-65536);
+      flushStderr();
+    });
+    child.stderr.on("end", () => flushStderr(true));
     child.stdin.on("error", () => {});
     const connection = acp
       .client({ name: "acpao" })
@@ -135,6 +162,8 @@ export class Runtime {
     this.options.onStage?.(key, "started");
     const lost = () => {
       if (slot.stopping) return;
+      flushStderr(true);
+      this.store.diagnostic({ level: "error", source: "agent", code: "ACP_EXIT", message: `Agent 进程或 ACP 连接已退出${child.exitCode === null ? "" : `，退出码 ${child.exitCode}`}`, session: key, agent: config.id });
       slot.stopping = true;
       this.resolvePermissions(key);
       this.slots.delete(key);
@@ -208,10 +237,13 @@ export class Runtime {
       }
       if (slot.stopping) throw new AppError("AGENT_EXITED", "Agent 初始化时退出");
       this.options.onStage?.(key, "session");
+      this.store.diagnostic({ level: "info", source: "agent", code: "ACP_READY", message: "ACP 会话已创建", session: key, agent: config.id });
       slot.ready = true;
       this.store.updateSession(key, { status: "idle", error: undefined });
       this.pump();
     } catch (e) {
+      flushStderr(true);
+      this.store.diagnostic({ level: "error", source: "agent", code: "ACP_CONNECT_FAILED", message: redact(e instanceof Error ? e.message : "ACP 连接失败"), session: key, agent: config.id });
       this.stopSlot(key);
       this.store.updateSession(key, {
         status: "error",

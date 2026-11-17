@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { setup, owner, adminToken, until } from "./helpers.js";
@@ -42,6 +44,20 @@ test("Agent configuration is saved only after a real ACP session opens", async (
   });
   assert.equal(missing.json().ok, false);
   assert.equal(c.store.host("local").agents.some((a) => a.id === "missing"), false);
+  const broken = resolve(c.root, "broken-agent.mjs");
+  await writeFile(broken, 'console.error("Adapter login failed"); process.exit(1);');
+  const failed = await c.app.inject({
+    method: "POST",
+    url: "/api/hosts/local/agent",
+    headers: { authorization: `Bearer ${adminToken}` },
+    payload: {
+      agent: { id: "broken", name: "Broken", command: process.execPath, args: [broken], env: {} },
+    },
+  });
+  assert.equal(failed.json().ok, false);
+  assert.match(failed.json().probe.stderr, /Adapter login failed/);
+  assert.equal(c.store.host("local").agents.some((a) => a.id === "broken"), false);
+  assert.ok(c.store.diagnostics().some((entry) => entry.code === "AGENT_PROBE_STDERR"));
   const mock = c.store.host("local").agents[0]!;
   const updated = await c.app.inject({
     method: "POST",
@@ -56,6 +72,17 @@ test("Agent configuration is saved only after a real ACP session opens", async (
     headers: { authorization: `Bearer ${adminToken}` },
   });
   assert.equal(detail.json().command, mock.command);
+  const disabled = await c.app.inject({
+    method: "POST",
+    url: "/api/settings/test-features",
+    headers: { authorization: `Bearer ${adminToken}` },
+    payload: { enabled: false },
+  });
+  assert.equal(disabled.statusCode, 200);
+  assert.equal(
+    (await c.app.inject({ method: "POST", url: "/api/hosts/local/agent", headers: { authorization: `Bearer ${adminToken}` }, payload: { agent: mock } })).statusCode,
+    403,
+  );
 });
 test("HTTP auth, cookie login, origin checks and role boundaries", async (t) => {
   const c = await setup(t);

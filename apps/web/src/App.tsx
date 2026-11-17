@@ -31,7 +31,7 @@ import {
   Download,
 } from "lucide-react";
 
-import { api, busy, type Host, type Session, type ChatData, type Agent } from "./api";
+import { api, busy, type Host, type Session, type ChatData, type Agent, type DiagnosticData } from "./api";
 import { Mark, Status, Modal, Copy, relativeTime, Conversation, AgentForm } from "./ui";
 export default function App() {
   const [auth, setAuth] = useState<boolean | null>(null),
@@ -39,9 +39,10 @@ export default function App() {
     [route, setRoute] = useState(location.hash.slice(1) || "/workspace"),
     [hosts, setHosts] = useState<Host[]>([]),
     [sessions, setSessions] = useState<Session[]>([]),
-    [config, setConfig] = useState<{ main: string | null; root: string }>({
+    [config, setConfig] = useState<{ main: string | null; root: string; testFeatures: boolean }>({
       main: null,
       root: "",
+      testFeatures: false,
     }),
     [chat, setChat] = useState<ChatData | null>(null),
     [older, setOlder] = useState(false),
@@ -66,7 +67,9 @@ export default function App() {
     [isolate, setIsolate] = useState(false),
     [pairName, setPairName] = useState(""),
     [pair, setPair] = useState<{ code: string; host: string } | null>(null),
-    [diagnostics, setDiagnostics] = useState<unknown>(),
+    [diagnostics, setDiagnostics] = useState<DiagnosticData | null>(null),
+    [logSearch, setLogSearch] = useState(""),
+    [logLevel, setLogLevel] = useState("all"),
     [recovery, setRecovery] = useState<{
       host: string;
       token: string;
@@ -86,6 +89,7 @@ export default function App() {
       ? config.main
       : null;
   const activeRef = useRef(sessionId);
+  const moreMenu = useRef<HTMLDetailsElement>(null);
   activeRef.current = sessionId;
   const host = hosts.find((h) => h.id === hostId);
   const currentSession = sessions.find((s) => s.id === sessionId);
@@ -95,7 +99,7 @@ export default function App() {
       const [hs, ss, cf] = await Promise.all([
         api<Host[]>("/hosts"),
         api<Session[]>("/sessions"),
-        api<{ main: string | null; root: string }>("/config"),
+        api<{ main: string | null; root: string; testFeatures: boolean }>("/config"),
       ]);
       setHosts(hs);
       setSessions(ss);
@@ -104,6 +108,34 @@ export default function App() {
       report(e);
     }
   }, [report]);
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      if (!moreMenu.current?.contains(event.target as Node)) moreMenu.current?.removeAttribute("open");
+    };
+    const closeEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") moreMenu.current?.removeAttribute("open");
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, []);
+  useEffect(() => {
+    if (modal !== "diagnostics") return;
+    const timer = setInterval(() => {
+      void api<DiagnosticData>("/diagnostics").then((fresh) =>
+        setDiagnostics((old) => ({
+          ...fresh,
+          logs: [...new Map([...fresh.logs, ...(old?.logs ?? [])].map((log) => [log.id, log])).values()]
+            .sort((a, b) => b.id - a.id)
+            .slice(0, 1000),
+        })),
+      ).catch(report);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [modal, report]);
   const refreshChat = useCallback(async () => {
     const key = activeRef.current;
     if (!key) return;
@@ -208,9 +240,9 @@ export default function App() {
   }, [toast]);
   const detect = async () => {
     try {
-      const d = await api<{ agents: Agent[]; fixture: Agent }>("/agents/detect");
+      const d = await api<{ agents: Agent[]; fixture: Agent | null }>("/agents/detect");
       setDetected(d.agents);
-      setFixture(d.fixture);
+      setFixture(d.fixture ?? undefined);
     } catch (e) {
       report(e);
     }
@@ -491,25 +523,27 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <details className="more-menu">
+            <details className="more-menu" ref={moreMenu}>
               <summary className="icon-button" aria-label="更多设置">
                 <MoreHorizontal size={19} />
               </summary>
               <div>
                 <button
                   onClick={() => {
-                    void api("/diagnostics").then(setDiagnostics).catch(report);
+                    moreMenu.current?.removeAttribute("open");
+                    void api<DiagnosticData>("/diagnostics").then(setDiagnostics).catch(report);
                     setModal("diagnostics");
                   }}
                 >
                   日志与诊断
                 </button>
                 <button
-                  onClick={() =>
+                  onClick={() => {
+                    moreMenu.current?.removeAttribute("open");
                     void api("/logout", {})
                       .then(() => setAuth(false))
-                      .catch(report)
-                  }
+                      .catch(report);
+                  }}
                 >
                   <LogOut size={14} />
                   退出登录
@@ -683,6 +717,7 @@ export default function App() {
                 {!isWorkspace && (
                   <button
                     className="subtle-button"
+                    disabled={working || config.main === sessionId}
                     onClick={() =>
                       void api("/main", { session: sessionId })
                         .then(() => {
@@ -692,7 +727,7 @@ export default function App() {
                         .catch(report)
                     }
                   >
-                    设为主 Agent
+                    {config.main === sessionId ? "当前主 Agent" : "设为主 Agent"}
                   </button>
                 )}
                 <details className="action-menu">
@@ -790,7 +825,7 @@ export default function App() {
                   aria-label="发送给 Agent 的指令"
                   placeholder={
                     busy(currentSession?.status)
-                      ? "补充要求… 将在当前工作结束后发送"
+                      ? "补充要求… 发送后会排队等待当前工作结束"
                       : "描述你想完成的工作…"
                   }
                   value={text}
@@ -836,9 +871,15 @@ export default function App() {
               </form>
               <div className="composer-hint">
                 <span>
-                  {currentSession?.agent === "mock"
-                    ? "协议测试 Agent · 无模型推理"
-                    : "Agent 可操作工作目录。权限确认不等同于系统沙箱。"}
+                  {currentSession?.status === "waiting_permission"
+                    ? "Agent 正等待你的审批，处理后会继续工作。"
+                    : currentSession?.status === "running"
+                      ? `Agent 正在执行${chat?.queued ? ` · 还有 ${chat.queued} 条消息待发送` : " · 新消息会排队"}`
+                      : currentSession?.status === "interrupted"
+                        ? "Agent 连接已中断，可在会话操作中尝试恢复历史。"
+                        : currentSession?.agent === "mock"
+                          ? "协议测试 Agent · 无模型推理"
+                          : "Agent 可操作工作目录。权限确认不等同于系统沙箱。"}
                 </span>
                 <span>Enter 发送 · Shift Enter 换行</span>
               </div>
@@ -1136,7 +1177,7 @@ export default function App() {
         </Modal>
       )}
       {modal === "agent" && (
-        <Modal title={editingAgent ? "编辑 ACP Agent" : "连接 ACP Agent"} onClose={() => setModal(null)}>
+        <Modal title={editingAgent ? "编辑 ACP Agent" : "连接 ACP Agent"} backdropClose={false} onClose={() => setModal(null)}>
           {detected.length > 0 && (
             <div className="detected">
               <p>检测到以下启动程序（尚未验证登录状态）</p>
@@ -1164,7 +1205,7 @@ export default function App() {
                 : fixture
             }
           />
-          <p className="hint">测试 Agent 仅用于验证协议、流式输出和委派，不具备模型推理能力。</p>
+          {config.testFeatures && <p className="hint">测试 Agent 仅用于验证协议、流式输出和委派，不具备模型推理能力。</p>}
         </Modal>
       )}
       {modal === "pair" && (
@@ -1281,11 +1322,73 @@ export default function App() {
       )}
       {modal === "diagnostics" && (
         <Modal title="日志与诊断" onClose={() => setModal(null)}>
-          <p className="hint">
-            记录控制操作和中断原因。详细 ACP 原始事件通过会话历史接口按游标读取；原始事件保留 30
-            天，对话内容独立保存。
-          </p>
-          <pre className="diagnostics">{JSON.stringify(diagnostics, null, 2)}</pre>
+          <div className="diagnostic-settings">
+            <div>
+              <strong>测试功能</strong>
+              <p>开启后可使用测试 Agent；正式 Agent 的连接不受影响。</p>
+            </div>
+            <input
+              type="checkbox"
+              aria-label="测试功能"
+              checked={diagnostics?.testFeatures ?? false}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setDiagnostics((old) => old ? { ...old, testFeatures: enabled } : old);
+                setConfig((old) => ({ ...old, testFeatures: enabled }));
+                void api("/settings/test-features", { enabled })
+                  .then(() => {
+                    void detect();
+                  })
+                  .catch((error) => {
+                    setDiagnostics((old) => old ? { ...old, testFeatures: !enabled } : old);
+                    setConfig((old) => ({ ...old, testFeatures: !enabled }));
+                    report(error);
+                  });
+              }}
+            />
+          </div>
+          <div className="diagnostic-filters">
+            <input
+              aria-label="搜索日志"
+              placeholder="搜索 Agent、错误或会话…"
+              value={logSearch}
+              onChange={(event) => setLogSearch(event.target.value)}
+            />
+            <select aria-label="日志级别" value={logLevel} onChange={(event) => setLogLevel(event.target.value)}>
+              <option value="all">全部</option>
+              <option value="error">错误</option>
+              <option value="warning">提示</option>
+              <option value="info">信息</option>
+            </select>
+          </div>
+          <div className="diagnostic-list">
+            {diagnostics?.logs.filter((log) =>
+              (logLevel === "all" || log.level === logLevel) &&
+              `${log.message} ${log.agent ?? ""} ${log.session ?? ""} ${log.code}`
+                .toLowerCase()
+                .includes(logSearch.toLowerCase()),
+            ).map((log) => (
+              <details className={`diagnostic-entry ${log.level}`} key={log.id}>
+                <summary>
+                  <span>{new Date(log.createdAt).toLocaleString()}</span>
+                  <strong>{log.message.split("\n")[0]}</strong>
+                  <small>{log.agent ?? log.source}</small>
+                </summary>
+                <pre>{log.message}</pre>
+                <p>{log.code}{log.session ? ` · ${log.session}` : ""}</p>
+              </details>
+            ))}
+            {diagnostics?.logs.length === 0 && <p className="hint">还没有诊断记录。</p>}
+          </div>
+          {diagnostics?.logs.length && diagnostics.logs.length < 1000 ? (
+            <button className="text-button" onClick={() => {
+              const before = diagnostics.logs.at(-1)?.id;
+              if (!before) return;
+              void api<DiagnosticData>(`/diagnostics?before=${before}`).then((older) =>
+                setDiagnostics((current) => current ? { ...current, logs: [...current.logs, ...older.logs] } : current),
+              ).catch(report);
+            }}>查看更早记录</button>
+          ) : null}
         </Modal>
       )}
       {recovery && (

@@ -40,10 +40,12 @@ export function Modal({
   title,
   children,
   onClose,
+  backdropClose = true,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  backdropClose?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -54,7 +56,7 @@ export function Modal({
       ref={ref}
       onCancel={onClose}
       onClick={(e) => {
-        if (e.target === ref.current) onClose();
+        if (backdropClose && e.target === ref.current) onClose();
       }}
     >
       <div className="modal-head">

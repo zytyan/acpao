@@ -34,6 +34,7 @@ export interface AppOptions {
   adminToken?: string;
   launchToken?: string;
   demo?: boolean;
+  testFeatures?: boolean;
   publicUrl?: string;
   logger?: boolean;
   promptTimeoutMs?: number;
@@ -82,6 +83,7 @@ export async function createApp(options: AppOptions = {}) {
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
   const store = new Store(resolve(data, "center.sqlite"));
+  if (options.demo || options.testFeatures) store.put("setting", "test-features", true);
   const previousAdminHash = store.get<string>("setting", "admin-token-hash");
   if (previousAdminHash !== hash(token)) {
     store.revoke("admin", "owner");
@@ -277,6 +279,7 @@ export async function createApp(options: AppOptions = {}) {
     return {
       main: store.get<string>("setting", "main") ?? null,
       root,
+      testFeatures: store.get<boolean>("setting", "test-features") ?? false,
       capabilities: {
         steering: false,
         sshBootstrap: false,
@@ -292,6 +295,14 @@ export async function createApp(options: AppOptions = {}) {
     store.audit(p, "workspace.main", v.session);
     store.event("", "main", {});
     return { ok: true };
+  });
+  app.post("/api/settings/test-features", async (req) => {
+    const p = admin(req);
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
+    store.put("setting", "test-features", enabled);
+    store.audit(p, "settings.test-features", String(enabled));
+    store.event("", "settings", { testFeatures: enabled });
+    return { enabled };
   });
   app.get("/api/hosts", async (req) => {
     admin(req);
@@ -328,13 +339,13 @@ export async function createApp(options: AppOptions = {}) {
     }
     return {
       agents: detected,
-      fixture: {
+      fixture: store.get<boolean>("setting", "test-features") ? {
         id: "mock",
         name: "测试 Agent · 不调用模型",
         command: process.execPath,
         args: options.executable ? [] : [resolve(project, "scripts/mock-agent.mjs")],
         env: options.executable ? { ACPAO_SEA_MODE: "mock-agent" } : {},
-      },
+      } : null,
     };
   });
   app.put("/api/hosts/local/agents", async (req) => {
@@ -352,7 +363,18 @@ export async function createApp(options: AppOptions = {}) {
     const p = admin(req),
       v = z.object({ agent: AgentSchema }).parse(req.body),
       h = store.host("local");
+    if (v.agent.id === "mock" && !store.get<boolean>("setting", "test-features"))
+      throw new AppError("TEST_FEATURES_DISABLED", "请先在日志与诊断中开启测试功能", 403);
     const probe = await probeAgent(v.agent, root);
+    store.diagnostic({
+      level: probe.ok ? "info" : "error",
+      source: "probe",
+      code: probe.ok ? "AGENT_PROBE_OK" : "AGENT_PROBE_FAILED",
+      message: `${v.agent.name}：${probe.message}`,
+      agent: v.agent.id,
+    });
+    if (!probe.ok && probe.stderr)
+      store.diagnostic({ level: "error", source: "probe", code: "AGENT_PROBE_STDERR", message: probe.stderr, agent: v.agent.id });
     store.audit(p, probe.ok ? "agent.probe.success" : "agent.probe.failure", v.agent.id);
     if (!probe.ok) return { ok: false, probe };
     store.put("host", "local", {
@@ -474,6 +496,7 @@ export async function createApp(options: AppOptions = {}) {
       session: store.session(key),
       messages: store.messages(key, query.before),
       approvals: store.approvals(key),
+      queued: store.commands(key, "queued").length,
       delegations: store
         .sessions()
         .filter((s) => s.parent === key)
@@ -619,13 +642,16 @@ export async function createApp(options: AppOptions = {}) {
   });
   app.get("/api/diagnostics", async (req) => {
     admin(req);
+    const { before } = z.object({ before: z.coerce.number().int().positive().optional() }).parse(req.query);
     return {
+      logs: store.diagnostics(before),
       audit: store.db.prepare("SELECT * FROM audit ORDER BY id DESC LIMIT 100").all(),
       sessions: store
         .sessions()
         .filter((s) => ["error", "interrupted"].includes(s.status))
         .map((s) => ({ session: s.id, title: s.title, error: s.error })),
-      retentionDays: 30,
+      retentionDays: 180,
+      testFeatures: store.get<boolean>("setting", "test-features") ?? false,
     };
   });
   const web = resolve(

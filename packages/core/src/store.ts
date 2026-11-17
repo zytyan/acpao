@@ -16,6 +16,16 @@ import {
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const secret = () => randomBytes(32).toString("base64url");
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
+export interface Diagnostic {
+  id: number;
+  createdAt: number;
+  level: "info" | "warning" | "error";
+  source: string;
+  code: string;
+  message: string;
+  session?: string;
+  agent?: string;
+}
 const decode = <T>(row: unknown): T | undefined =>
   row ? (JSON.parse((row as { data: string }).data) as T) : undefined;
 export class Store {
@@ -34,6 +44,8 @@ export class Store {
   CREATE INDEX IF NOT EXISTS messages_session ON messages(session,id);
   CREATE TABLE IF NOT EXISTS credentials (hash TEXT PRIMARY KEY,data TEXT NOT NULL,expires INTEGER);
   CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,action TEXT NOT NULL,target TEXT NOT NULL,createdAt INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS diagnostic (id INTEGER PRIMARY KEY AUTOINCREMENT,createdAt INTEGER NOT NULL,level TEXT NOT NULL,source TEXT NOT NULL,code TEXT NOT NULL,message TEXT NOT NULL,session TEXT,agent TEXT);
+  CREATE INDEX IF NOT EXISTS diagnostic_time ON diagnostic(createdAt);
   `);
     this.changes.setMaxListeners(200);
   }
@@ -183,6 +195,26 @@ export class Store {
       .prepare("INSERT INTO audit(actor,action,target,createdAt) VALUES (?,?,?,?)")
       .run(`${p.kind}:${p.id}`, action, target, Date.now());
   }
+  diagnostic(entry: Omit<Diagnostic, "id" | "createdAt">) {
+    const row = this.db
+      .prepare("INSERT INTO diagnostic(createdAt,level,source,code,message,session,agent) VALUES (?,?,?,?,?,?,?) RETURNING id")
+      .get(
+        Date.now(),
+        entry.level,
+        entry.source,
+        entry.code,
+        entry.message.slice(0, 8192),
+        entry.session ?? null,
+        entry.agent ?? null,
+      ) as { id: number };
+    this.changes.emit("event");
+    return row.id;
+  }
+  diagnostics(before?: number, limit = 100): Diagnostic[] {
+    return this.db
+      .prepare("SELECT * FROM diagnostic WHERE id<? ORDER BY id DESC LIMIT ?")
+      .all(before ?? Number.MAX_SAFE_INTEGER, limit) as unknown as Diagnostic[];
+  }
   prune(days = 30) {
     const cutoff = Date.now() - days * 86400000;
     const pruned = (
@@ -202,6 +234,8 @@ export class Store {
       .prepare("DELETE FROM events WHERE createdAt<? AND kind NOT IN ('session','approval')")
       .run(cutoff);
     this.db.prepare("DELETE FROM audit WHERE createdAt<?").run(Date.now() - 90 * 86400000);
+    this.db.prepare("DELETE FROM diagnostic WHERE createdAt<?").run(Date.now() - 180 * 86400000);
+    this.db.prepare("DELETE FROM diagnostic WHERE id NOT IN (SELECT id FROM diagnostic ORDER BY id DESC LIMIT 100000)").run();
     this.db
       .prepare("DELETE FROM credentials WHERE expires IS NOT NULL AND expires<?")
       .run(Date.now());

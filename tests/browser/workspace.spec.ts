@@ -94,3 +94,29 @@ test("login → bootstrap → streamed workspace → delegation → approval →
   });
   expect(errors).toEqual([]);
 });
+
+test("diagnostics toggle, menu dismissal and Agent editor behave consistently", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("工作区登录密钥").fill("browser-test-admin-secret-123456");
+  await page.getByRole("button", { name: "进入工作区" }).click();
+  await page.getByRole("link", { name: "主机", exact: true }).click();
+  await page.getByLabel("更多设置").click();
+  await expect(page.locator(".more-menu")).toHaveAttribute("open", "");
+  await page.getByRole("heading", { name: "工作，在你的设备上发生。" }).click();
+  await expect(page.locator(".more-menu")).not.toHaveAttribute("open", "");
+  await page.getByLabel("更多设置").click();
+  await page.getByRole("button", { name: "日志与诊断" }).click();
+  await expect(page.getByRole("heading", { name: "日志与诊断" })).toBeVisible();
+  await expect(page.getByLabel("测试功能")).toBeChecked();
+  await page.getByLabel("测试功能").uncheck();
+  await page.getByRole("button", { name: "关闭弹窗" }).click();
+  await page.getByRole("button", { name: "添加 Agent" }).click();
+  await expect(page.getByRole("button", { name: "使用测试 Agent" })).toHaveCount(0);
+  await page.mouse.click(2, 2);
+  await expect(page.getByRole("heading", { name: "连接 ACP Agent" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("heading", { name: "连接 ACP Agent" })).toHaveCount(0);
+  await page.getByRole("button", { name: /编辑 测试 Agent/ }).click();
+  await expect(page.getByRole("heading", { name: "编辑 ACP Agent" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "启动命令" })).toBeVisible();
+});
