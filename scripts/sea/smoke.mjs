@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import * as acp from "@agentclientprotocol/sdk";
+import { createHttpStream } from "@agentclientprotocol/sdk/experimental/http-client";
 
 const binary = resolve(process.argv[2] ?? "sea-build/acpao");
 const data = await mkdtemp(resolve(tmpdir(), "acpao-sea-smoke-"));
@@ -46,6 +48,22 @@ try {
   if (!created.ok) throw new Error(`ACP Session failed: ${created.status} ${await created.text()} ${output}`);
   const session = await created.json();
   if (!session.id || !session.acpId) throw new Error("ACP Session IDs missing");
+  const acpClient = acp.client({ name: "standalone-smoke" }).connect(
+    createHttpStream(`http://127.0.0.1:${port}/acp`, { headers: { Authorization: `Bearer ${token}` } }),
+  );
+  try {
+    await acpClient.agent.request(acp.methods.agent.initialize, {
+      protocolVersion: acp.PROTOCOL_VERSION,
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+    });
+    const external = await acpClient.agent.request(acp.methods.agent.session.new, { cwd: data, mcpServers: [] });
+    const response = await acpClient.agent.request(acp.methods.agent.session.prompt, {
+      sessionId: external.sessionId, prompt: [{ type: "text", text: "standalone HTTP smoke" }],
+    });
+    if (response.stopReason !== "end_turn") throw new Error("ACP HTTP Prompt did not finish");
+  } finally {
+    await acpClient.close();
+  }
   console.log(`Standalone executable launched and created ACP Session ${session.id}`);
 } finally {
   child.kill();
