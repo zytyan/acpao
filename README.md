@@ -4,7 +4,7 @@
 
 ## 启动
 
-GitHub Release 提供 Windows x64、Linux x64、Linux ARM64 的单个可执行文件。下载对应平台文件后直接运行，无需安装 Node.js 或 npm；程序首次运行会在当前目录的 `.data/runtime` 解出内置 Web 资源和服务代码，因此工作目录需要可写。Linux 先执行 `chmod +x acpao-linux-*`，Windows 可直接运行 `acpao-windows-x64.exe`。有桌面浏览器时会自动打开并登录；否则终端只显示一个可复制的授权链接。加 `--no-browser` 可强制只显示链接。链接 30 分钟内可使用一次，登录后令牌从地址栏移除，身份保存在 HttpOnly Cookie。本机登录保持有效，直到主动登出、清除浏览器数据或更换管理员密钥；远程登录有效期 30 天。默认工作目录为启动程序时的当前目录，需要指定其他目录时可设置 `ACPAO_ROOT`。远程设备上运行同一个文件并传入 `gateway` 参数可启动 Gateway；仍需按下文配置配对环境变量。真实 ACP Agent 及其登录凭据需要在目标主机另行安装和配置。
+GitHub Release 提供 Windows x64、Linux x64、Linux ARM64 的中心程序及独立 Go Gateway 可执行文件。下载对应平台文件后直接运行，无需安装 Node.js 或 npm；中心程序首次运行会在当前目录的 `.data/runtime` 解出内置 Web 资源和服务代码，因此工作目录需要可写。Linux 先执行 `chmod +x acpao-linux-* acpao-gateway-linux-*`。有桌面浏览器时会自动打开并登录；否则终端只显示一个可复制的授权链接。加 `--no-browser` 可强制只显示链接。链接 30 分钟内可使用一次，登录后令牌从地址栏移除，身份保存在 HttpOnly Cookie。本机登录保持有效，直到主动登出、清除浏览器数据或更换管理员密钥；远程登录有效期 30 天。默认工作目录为启动程序时的当前目录，需要指定其他目录时可设置 `ACPAO_ROOT`。远程设备使用 `acpao-gateway-*`；真实 ACP Agent 及其登录凭据仍需在目标主机另行安装。
 
 从源码运行或开发时：
 
@@ -86,8 +86,8 @@ MCP 同时提供 Streamable HTTP `/mcp`，需要 Bearer 身份；ACP 内使用�
 
 1. 给中心配置可达的 **HTTPS** 地址和 TLS 反向代理，参见 [部署说明](docs/deployment.md)。
 2. 在「主机 → 配对主机」生成一次性配对码，10 分钟有效、仅能使用一次。
-3. 在远端安装 Node.js 24、复制同一版本项目并运行 `npm ci && npm run build`。
-4. 在目标设备的项目目录执行 UI 给出的命令：
+3. 在远端下载匹配平台的 `acpao-gateway-*` 二进制，不需要 Node.js；被管理的 ACP Agent 本身可能另有运行时要求。
+4. 在目标设备执行配对命令：
 
 ```bash
 export ACPAO_CENTER='https://acp.example.com'
@@ -95,7 +95,7 @@ export ACPAO_PAIR_CODE='从 UI 取得的一次性配对码'
 export ACPAO_ROOT='/srv/work'
 # 可选：一个 Agent 配置数组文件，便于首次配对直接注册 Agent
 export ACPAO_AGENTS='/secure/agents.json'
-npm run gateway:start -- --pair
+./acpao-gateway-linux-x64 --pair
 ```
 
 示例 `agents.json`：
@@ -104,16 +104,16 @@ npm run gateway:start -- --pair
 [{ "id": "codex", "name": "Codex", "command": "/usr/local/bin/codex-acp", "args": [], "env": {} }]
 ```
 
-设备身份保存在 `.gateway/config.json`（0600），执行日志与 Session 关联保存在 `.gateway/gateway.sqlite`。若首次未提供 Agent 配置，在 `config.json` 中填写 `agents` 后重启 Gateway。Gateway 只使用本机配置中的可执行程序；中心无法通过远程指令替换它。
+设备身份保存在 `.gateway/config.json`（0600），执行日志与 Session 关联保存在 `.gateway/gateway-go.sqlite`。若首次未提供 Agent 配置，在 `config.json` 中填写 `agents` 后重启 Gateway。Gateway 只使用本机配置中的可执行程序；中心无法通过远程指令替换它。
 
-Gateway 主动建立 WSS，无需远端公网 IP，不依赖 VPN。仅同机开发可设置 `ACPAO_INSECURE_LOCAL=1` 使用 loopback HTTP。运行 `npm run gateway:start` 复用身份重连。
+Gateway 主动建立 WSS，无需远端公网 IP，不依赖 VPN。仅同机开发可设置 `ACPAO_INSECURE_LOCAL=1` 使用 loopback HTTP。日常运行 `./acpao-gateway-linux-x64 --daemon`，manager 会重启异常退出的 worker；Docker 中使用 `--foreground` 并设置容器 restart policy。需要 SSH 跳板时，配对前设置 `ACPAO_SSH_JUMP` 和 `ACPAO_SSH_TARGET`，后者为能访问中心地址的 SSH 目标；配置会存入设备文件，TLS 主机名仍按中心原地址校验。
 
 网断时本地 ACP 进程继续，关键事件持久化；重连按序号补发、中心事务去重。未确认的控制指令沿用稳定 ID 重发，Gateway 持久化执行回执，避免重复执行。Gateway **进程崩溃**时 stdio 不可恢复：启动后如实标记中断，不重放未知副作用；Agent 声明支持 `session/load` 时可以手动恢复历史并发送新的指令。
 
 主机的「身份管理」可撤销访问或轮换、下载恢复凭据。轮换立即使旧凭据失效；在目标设备先停止旧 Gateway，再执行：
 
 ```bash
-npm run gateway:start -- --import-identity /secure/identity.json
+./acpao-gateway-linux-x64 --import-identity /secure/identity.json
 ```
 
 恢复设备身份、恢复中心数据库、恢复 Agent 本地历史是三件不同的事。设备凭据泄露应立即轮换或撤销。撤销阻止连接与中心操作，不会远程杀死设备上已有进程。

@@ -25,7 +25,19 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/gateway-go/go.mod
+          cache-dependency-path: apps/gateway-go/go.sum
       - run: npm ci
+      - name: Build Go Gateway
+        shell: bash
+        working-directory: apps/gateway-go
+        run: |
+          suffix=""
+          if [ "$RUNNER_OS" = Windows ]; then suffix=".exe"; fi
+          CGO_ENABLED=0 go build -buildvcs=false -o "$GITHUB_WORKSPACE/gateway-go$suffix" .
+          echo "GO_GATEWAY_BIN=$GITHUB_WORKSPACE/gateway-go$suffix" >> "$GITHUB_ENV"
       - run: npm run typecheck
       - run: npm run build
       - if: runner.os != 'Windows'

@@ -403,7 +403,7 @@ export async function createApp(options: AppOptions = {}) {
       host,
       expiresAt: Date.now() + 600000,
       command:
-        "在目标主机运行 npm run gateway -- --pair，并通过 ACPAO_CENTER、ACPAO_PAIR_CODE、ACPAO_ROOT 环境变量提供配置。",
+        "在目标主机下载对应平台的 acpao-gateway 二进制并运行 --pair，通过 ACPAO_CENTER、ACPAO_PAIR_CODE、ACPAO_ROOT 环境变量提供配置。",
     };
   });
   app.post(

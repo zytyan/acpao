@@ -1,6 +1,6 @@
 # ACPAO 实施记录
 
-采用 Node.js 24 + TypeScript strict + Fastify + node:sqlite（WAL），React/Vite/Tailwind。中心不调用模型 API。稳定 ACP v1 接口以安装包声明为准；MCP 使用正式 1.x SDK。每个会话独立进程，平台 ID 与 ACP ID 分开；保守拒绝 Steering，不伪造协议能力。
+中心采用 Node.js 24 + TypeScript strict + Fastify + node:sqlite（WAL），前端为 React/Vite/Tailwind；远端 Gateway 使用 Go。中心不调用模型 API。稳定 ACP v1 接口以安装包声明为准；MCP 使用正式 1.x SDK。每个会话独立进程，平台 ID 与 ACP ID 分开；Steering 只在 Agent 的 `_meta.steering.supported` 明确声明后使用。
 
 中心：Host 身份、Session 目录、指令投递、中心事件游标、审批与审计。执行端（本地 Runtime / Gateway）：ACP 连接、执行状态、串行队列、权限等待、原始事件。远程状态只经带序号的执行端事件更新中心投影。网关指令稳定 ID，落盘后应答；重试返回原结果，崩溃中的指令标记 interrupted，绝不自动重放副作用。
 

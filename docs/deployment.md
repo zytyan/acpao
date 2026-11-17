@@ -42,16 +42,16 @@ Dockerfile 提供可选 Node 镜像入口，默认普通 `node` 用户。镜像�
 
 ## Gateway
 
-同版本源码和 Node 运行时必须位于目标主机；Gateway 的项目目录与 `root` 工作目录可以不同。在项目目录运行 `npm run gateway:start`。`ACPAO_GATEWAY_CONFIG` 可指定配置文件路径，默认 `.gateway/config.json`。设备配置目录与 SQLite 文件必须持久保存。
+目标主机下载 Release 中匹配平台的 `acpao-gateway-*` 可执行文件。`--config` 可指定配置文件路径，默认 `.gateway/config.json`。设备配置目录与 `gateway-go.sqlite` 必须持久保存；Agent 自身的安装与登录资料需另行保存。
 
 首次配对需要先通过中心 UI 生成一次性配对码；不要把中心管理员密钥复制给 Gateway。SSH 自动上传、安装 Agent 和远程登录 UI 尚未实现；目前由人类通过 SSH 或目标设备终端执行明确命令。
 
-建议 systemd 服务以普通用户运行，`WorkingDirectory` 指向项目目录，`ExecStart` 使用 Node 的绝对路径及 `dist/apps/gateway/src/main.js`；根据需要设置受限的 `EnvironmentFile`，不要把凭据写进启动参数和日志。不要启用会阻断你所需 Agent 功能的 OS 沙箱后声称 Agent 必定兼容，应实际验证。
+普通主机可运行 `acpao-gateway-linux-x64 --daemon`：manager 监视 worker 并在退出后重启。Docker 容器内使用 `--foreground`，由容器 restart policy 管理整个进程。跳板连接可在配对时设置 `ACPAO_SSH_JUMP` 和 `ACPAO_SSH_TARGET`，Gateway 使用系统 `ssh -J` 建立本地转发，HTTPS/TLS 仍按中心原域名校验。该模式要求 SSH 密钥、已信任的主机指纹和目标机器上的 `ssh` 命令预先可用。不要把凭据写进启动参数和日志。
 
 ## 备份与恢复
 
 - **中心**：停止服务后备份整个 `.data`（数据库、必要密钥文件）；在线备份需用 SQLite 正式备份机制，不能单独拷贝 WAL 活跃时的主文件。
-- **Gateway**：备份整个 `.gateway`，包含设备身份和执行日志。备份 Agent 自己的本地历史/登录目录和工作目录是另外的操作。
+- **Gateway**：备份整个 `.gateway`，包含设备身份和 Go SQLite 执行日志。备份 Agent 自己的本地历史/登录目录和工作目录是另外的操作。
 - **身份恢复**：下载的 JSON 仅恢复设备 Host ID 和 token。轮换后将其通过 `--import-identity` 导入已有配置；不会重建丢失的执行日志。
 - **中心重启**：本地会话标记中断，远端主机先标记离线；Gateway 重连同步后更新远端会话，不自动重复 Prompt。
 - **Gateway 重启**：未知执行结果标记中断；真实 `session/load` 只恢复历史，当前 Prompt 不自动恢复。

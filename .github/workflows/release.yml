@@ -31,6 +31,10 @@ jobs:
         with:
           node-version: 24.22.3
           cache: npm
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/gateway-go/go.mod
+          cache-dependency-path: apps/gateway-go/go.sum
       - run: npm ci
       - run: npm run build:binary
       - name: Smoke test executable
@@ -46,6 +50,7 @@ jobs:
           suffix=""
           if [ "${{ matrix.platform }}" = windows ]; then suffix=".exe"; fi
           cp "sea-build/${{ matrix.filename }}" "release/acpao-${{ matrix.platform }}-${{ matrix.arch }}${suffix}"
+          (cd apps/gateway-go && CGO_ENABLED=0 go build -buildvcs=false -trimpath -o "$GITHUB_WORKSPACE/release/acpao-gateway-${{ matrix.platform }}-${{ matrix.arch }}${suffix}" .)
           if [ "${{ matrix.platform }}" = linux ]; then chmod +x release/*; fi
       - uses: actions/upload-artifact@v4
         with:
