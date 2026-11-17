@@ -120,3 +120,34 @@ test("diagnostics toggle, menu dismissal and Agent editor behave consistently", 
   await expect(page.getByRole("heading", { name: "编辑 ACP Agent" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "启动命令" })).toBeVisible();
 });
+
+test("Windows Agent command paste can be undone by bubble and Ctrl+Z", async ({ page }) => {
+  await page.route("**/api/hosts", async (route) => {
+    const response = await route.fetch();
+    const hosts = await response.json() as { id: string; platform?: string }[];
+    for (const host of hosts) if (host.id === "local") host.platform = "win32";
+    await route.fulfill({ response, json: hosts });
+  });
+  await page.goto("/");
+  await page.getByLabel("工作区登录密钥").fill("browser-test-admin-secret-123456");
+  await page.getByRole("button", { name: "进入工作区" }).click();
+  await page.getByRole("link", { name: "主机", exact: true }).click();
+  await page.getByRole("button", { name: "添加 Agent" }).click();
+  const editor = page.locator(".command-editor .cm-content");
+  await editor.fill("");
+  const paste = async () => page.evaluate(() => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "C:\\Program Files\\Code Agent\\agent.exe");
+    document.querySelector(".command-editor .cm-content")!.dispatchEvent(
+      new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }),
+    );
+  });
+  await paste();
+  await expect(editor).toHaveText('"C:/Program Files/Code Agent/agent.exe"');
+  await expect(page.getByRole("status").filter({ hasText: "已将 Windows 路径整理" })).toBeVisible();
+  await page.getByRole("button", { name: "撤销 Windows 路径整理" }).click();
+  await expect(editor).toBeEmpty();
+  await paste();
+  await editor.press("Control+z");
+  await expect(editor).toBeEmpty();
+});

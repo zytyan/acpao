@@ -77,10 +77,11 @@ export function CommandEditor({
     <div className="command-editor-wrap">
       <div ref={mount} className="command-editor" />
       {rewritten !== null && (
-        <div className="command-edit-bubble" role="status">
-          已将 Windows 路径整理为可运行的命令
+        <div className="command-edit-bubble">
+          <span role="status">已将 Windows 路径整理为可运行的命令</span>
           <button
             type="button"
+            aria-label="撤销 Windows 路径整理"
             onClick={() => {
               if (view.current) undo(view.current);
               setRewritten(null);
