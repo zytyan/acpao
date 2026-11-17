@@ -7,6 +7,7 @@ const { app } = await createApp({
   dataDir: resolve(root, "data"),
   root,
   adminToken: "browser-test-admin-secret-123456",
+  launchToken: "browser-test-launch-token-123456",
   demo: false,
 });
 await app.listen({ host: "127.0.0.1", port: 4317 });

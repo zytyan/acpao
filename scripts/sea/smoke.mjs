@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 const binary = resolve(process.argv[2] ?? "sea-build/acpao");
 const data = await mkdtemp(resolve(tmpdir(), "acpao-sea-smoke-"));
 const port = String(18000 + Math.floor(Math.random() * 30000));
-const child = spawn(binary, [], {
+const child = spawn(binary, ["--no-browser"], {
   env: { ...process.env, ACPAO_DATA_DIR: data, ACPAO_ROOT: data, ACPAO_DEMO: "1", PORT: port },
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -29,6 +29,8 @@ try {
     await new Promise((done) => setTimeout(done, 100));
   }
   if (!ready || !token) throw new Error(`Server did not become ready: ${output}`);
+  if (!new RegExp(`^http://127\\.0\\.0\\.1:${port}/#launch=[A-Za-z0-9_-]+$`).test(output.trim()))
+    throw new Error(`Manual mode did not print exactly one authorized URL: ${output}`);
   const login = await fetch(`http://127.0.0.1:${port}/api/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },

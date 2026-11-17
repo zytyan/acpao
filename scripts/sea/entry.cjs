@@ -28,7 +28,8 @@ const { getAsset, isSea } = require("node:sea");
   fs.writeFileSync(script, Buffer.from(getAsset(entry)).toString(), { mode: 0o600 });
   process.env.ACPAO_EMBEDDED_WEB = path.join(root, "apps/web/dist");
   process.env.ACPAO_EMBEDDED_RUNTIME = root;
-  process.argv.splice(1, 1);
+  if (!process.env.ACPAO_SEA_MODE && ["gateway", "mcp-bridge", "mock-agent"].includes(command))
+    process.argv.splice(1, 1);
   await import(require("node:url").pathToFileURL(script).href);
 })().catch((error) => {
   console.error("ACPAO startup failed:", error.message);

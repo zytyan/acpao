@@ -16,6 +16,8 @@ test("center restart retains history, marks unfinished work interrupted and supp
     };
   let c = await createApp(options);
   await c.app.listen({ host: "127.0.0.1", port: 0 });
+  const login = await c.app.inject({ method: "POST", url: "/api/login", payload: { token: adminToken } });
+  const cookie = login.headers["set-cookie"] as string;
   const host = c.store.host("local");
   host.agents[0]!.env.MOCK_LOAD = "1";
   c.store.put("host", "local", host);
@@ -34,6 +36,7 @@ test("center restart retains history, marks unfinished work interrupted and supp
     await rm(root, { recursive: true, force: true });
   });
   assert.equal(c.store.session(s.id).status, "interrupted");
+  assert.equal((await c.app.inject({ url: "/api/config", headers: { cookie } })).statusCode, 200);
   assert.equal(c.store.commands(s.id).find((x) => x.id === "crash-running")?.status, "interrupted");
   assert.match(
     c.store
@@ -50,4 +53,8 @@ test("center restart retains history, marks unfinished work interrupted and supp
     (v) => v === "completed",
   );
   assert.equal(c.store.messages(s.id).filter((m) => m.role === "user").length, 3);
+  await c.app.close();
+  c = await createApp({ ...options, adminToken: "rotated-admin-token-123456" });
+  await c.app.listen({ host: "127.0.0.1", port: 0 });
+  assert.equal((await c.app.inject({ url: "/api/config", headers: { cookie } })).statusCode, 401);
 });

@@ -31,6 +31,7 @@ export interface AppOptions {
   projectRoot?: string;
   executable?: boolean;
   adminToken?: string;
+  launchToken?: string;
   demo?: boolean;
   publicUrl?: string;
   logger?: boolean;
@@ -80,8 +81,14 @@ export async function createApp(options: AppOptions = {}) {
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
   const store = new Store(resolve(data, "center.sqlite"));
-  store.revoke("admin", "owner");
+  const previousAdminHash = store.get<string>("setting", "admin-token-hash");
+  if (previousAdminHash !== hash(token)) {
+    store.revoke("admin", "owner");
+    store.put("setting", "admin-token-hash", hash(token));
+  }
   store.credential(token, { kind: "admin", id: "owner" });
+  if (options.launchToken)
+    store.credential(options.launchToken, { kind: "admin", id: "owner" }, Date.now() + 30 * 60000);
   if (!store.get<Host>("host", "local"))
     store.put("host", "local", {
       id: "local",
@@ -154,6 +161,9 @@ export async function createApp(options: AppOptions = {}) {
     if (p.kind !== "admin") throw new AppError("FORBIDDEN", "需要人类管理员权限", 403);
     return p;
   };
+  const isLocalRequest = (req: import("fastify").FastifyRequest) =>
+    ["localhost", "127.0.0.1", "::1"].includes(req.hostname) &&
+    ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.ip);
   const secureRequest = (req: import("fastify").FastifyRequest) => {
     if (req.protocol === "https") return;
     const host = req.hostname;
@@ -211,9 +221,17 @@ export async function createApp(options: AppOptions = {}) {
     )
       principal(req);
   });
-  app.get("/api/auth", async (req) => {
+  app.get("/api/auth", async (req, reply) => {
     try {
-      return { authenticated: principal(req).kind === "admin" };
+      const authenticated = principal(req).kind === "admin";
+      if (authenticated && isLocalRequest(req) && req.cookies.acpao)
+        reply.setCookie("acpao", req.cookies.acpao, {
+          httpOnly: true,
+          sameSite: "strict",
+          path: "/",
+          maxAge: 10 * 365 * 86400,
+        });
+      return { authenticated };
     } catch {
       return { authenticated: false };
     }
@@ -226,13 +244,21 @@ export async function createApp(options: AppOptions = {}) {
         p = store.authenticate(v.token);
       if (p?.kind !== "admin") throw new AppError("INVALID_CREDENTIAL", "登录密钥不正确", 401);
       const session = secret();
-      store.credential(session, { kind: "admin", id: "owner" }, Date.now() + 12 * 3600000);
+      const local = isLocalRequest(req);
+      const maxAge = local ? 10 * 365 * 86400 : 30 * 86400;
+      store.credential(
+        session,
+        { kind: "admin", id: "owner" },
+        local ? undefined : Date.now() + maxAge * 1000,
+      );
+      if (options.launchToken && hash(v.token) === hash(options.launchToken))
+        store.db.prepare("DELETE FROM credentials WHERE hash=?").run(hash(options.launchToken));
       reply.setCookie("acpao", session, {
         httpOnly: true,
         sameSite: "strict",
-        secure: !!publicUrl?.startsWith("https:"),
+        secure: !local && !!publicUrl?.startsWith("https:"),
         path: "/",
-        maxAge: 43200,
+        maxAge,
       });
       store.audit(p, "login", "workspace");
       return { ok: true };

@@ -3,6 +3,33 @@ import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { setup, owner, adminToken, until } from "./helpers.js";
+test("startup link creates a cookie and can be redeemed only once", async (t) => {
+  const launchToken = "single-use-startup-link-token-123456";
+  const c = await setup(t, { launchToken });
+  const login = await c.app.inject({
+    method: "POST",
+    url: "/api/login",
+    payload: { token: launchToken },
+  });
+  assert.equal(login.statusCode, 200);
+  const cookie = login.headers["set-cookie"] as string;
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /Max-Age=315360000/);
+  assert.equal((await c.app.inject({ url: "/api/config", headers: { cookie } })).statusCode, 200);
+  const resumed = await c.app.inject({ url: "/api/auth", headers: { cookie } });
+  assert.equal(resumed.json().authenticated, true);
+  assert.match(resumed.headers["set-cookie"] as string, /Max-Age=315360000/);
+  assert.equal(
+    (
+      await c.app.inject({
+        method: "POST",
+        url: "/api/login",
+        payload: { token: launchToken },
+      })
+    ).statusCode,
+    401,
+  );
+});
 test("HTTP auth, cookie login, origin checks and role boundaries", async (t) => {
   const c = await setup(t);
   assert.equal((await c.app.inject("/api/sessions")).statusCode, 401);

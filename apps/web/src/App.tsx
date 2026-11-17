@@ -122,9 +122,23 @@ export default function App() {
     }
   }, [report]);
   useEffect(() => {
-    void api<{ authenticated: boolean }>("/auth")
-      .then((a) => setAuth(a.authenticated))
-      .catch(report);
+    const launch = location.hash.startsWith("#launch=")
+      ? location.hash.slice("#launch=".length)
+      : null;
+    if (launch) {
+      history.replaceState(null, "", location.pathname + location.search);
+      setRoute("/workspace");
+      void api("/login", { token: launch })
+        .then(() => setAuth(true))
+        .catch((error) => {
+          setAuth(false);
+          report(error);
+        });
+    } else {
+      void api<{ authenticated: boolean }>("/auth")
+        .then((a) => setAuth(a.authenticated))
+        .catch(report);
+    }
     const change = () => setRoute(location.hash.slice(1) || "/workspace");
     window.addEventListener("hashchange", change);
     return () => window.removeEventListener("hashchange", change);

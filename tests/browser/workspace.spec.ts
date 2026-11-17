@@ -1,4 +1,13 @@
 import { test, expect } from "@playwright/test";
+test("startup link signs in and removes the token from the address bar", async ({ page }) => {
+  await page.goto("/#launch=browser-test-launch-token-123456");
+  await expect(page.getByRole("heading", { name: "选择工作主机" })).toBeVisible();
+  await expect(page).toHaveURL("http://127.0.0.1:4317/");
+  const cookie = (await page.context().cookies()).find((item) => item.name === "acpao");
+  expect(cookie?.httpOnly).toBe(true);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "选择工作主机" })).toBeVisible();
+});
 test("login → bootstrap → streamed workspace → delegation → approval → sessions → hosts → theme and mobile", async ({
   page,
 }) => {

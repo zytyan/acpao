@@ -4,7 +4,7 @@
 
 ## 启动
 
-GitHub Release 提供 Windows x64、Linux x64、Linux ARM64 的单个可执行文件。下载对应平台文件后直接运行，无需安装 Node.js 或 npm；程序首次运行会在当前目录的 `.data/runtime` 解出内置 Web 资源和服务代码，因此工作目录需要可写。Linux 先执行 `chmod +x acpao-linux-*`，Windows 可直接运行 `acpao-windows-x64.exe`。默认访问 `http://127.0.0.1:4310`，登录密钥位于 `.data/admin-token`。远程设备上运行同一个文件并传入 `gateway` 参数可启动 Gateway；仍需按下文配置配对环境变量。真实 ACP Agent 及其登录凭据需要在目标主机另行安装和配置。
+GitHub Release 提供 Windows x64、Linux x64、Linux ARM64 的单个可执行文件。下载对应平台文件后直接运行，无需安装 Node.js 或 npm；程序首次运行会在当前目录的 `.data/runtime` 解出内置 Web 资源和服务代码，因此工作目录需要可写。Linux 先执行 `chmod +x acpao-linux-*`，Windows 可直接运行 `acpao-windows-x64.exe`。有桌面浏览器时会自动打开并登录；否则终端只显示一个可复制的授权链接。加 `--no-browser` 可强制只显示链接。链接 30 分钟内可使用一次，登录后令牌从地址栏移除，身份保存在 HttpOnly Cookie。本机登录保持有效，直到主动登出、清除浏览器数据或更换管理员密钥；远程登录有效期 30 天。默认工作目录为启动程序时的当前目录，需要指定其他目录时可设置 `ACPAO_ROOT`。远程设备上运行同一个文件并传入 `gateway` 参数可启动 Gateway；仍需按下文配置配对环境变量。真实 ACP Agent 及其登录凭据需要在目标主机另行安装和配置。
 
 从源码运行或开发时：
 
@@ -16,7 +16,7 @@ npm run build
 npm start
 ```
 
-打开 **http://127.0.0.1:4310**。在服务器读取 `.data/admin-token`，用它登录；也可通过 `ACPAO_ADMIN_TOKEN` 指定至少 16 字符的密钥。密钥不会出现在服务日志或 Agent 工具返回中。
+启动后浏览器会自动打开，或在终端显示授权链接。手动登录仍可使用 `.data/admin-token` 中的密钥；也可通过 `ACPAO_ADMIN_TOKEN` 指定至少 16 字符的密钥。密钥不会出现在服务日志或 Agent 工具返回中。
 
 当前实施环境原先没有 Node.js，已校验并安装独立运行时到 `/tmp/node-v24.22.3-linux-x64`。在当前环境可以先执行：
 
