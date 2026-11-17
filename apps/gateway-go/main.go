@@ -279,7 +279,11 @@ func spawnManager(path string) error {
 	return cmd.Process.Release()
 }
 func stopManager(path string) error {
-	data, err := os.ReadFile(filepath.Join(filepath.Dir(path), "manager.pid"))
+	pidFile := filepath.Join(filepath.Dir(path), "manager.pid")
+	data, err := os.ReadFile(pidFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -291,7 +295,10 @@ func stopManager(path string) error {
 	if err != nil {
 		return err
 	}
-	return signalManager(process)
+	if err = signalManager(process); errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
+		return os.Remove(pidFile)
+	}
+	return err
 }
 
 func activeFile(path string) string { return filepath.Join(filepath.Dir(path), "active-binary") }
