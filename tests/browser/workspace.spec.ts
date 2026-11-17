@@ -1,0 +1,87 @@
+import { test, expect } from "@playwright/test";
+test("login → bootstrap → streamed workspace → delegation → approval → sessions → hosts → theme and mobile", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "让想法，开始流动。" })).toBeVisible();
+  await page.getByLabel("工作区登录密钥").fill("browser-test-admin-secret-123456");
+  await page.getByRole("button", { name: "进入工作区" }).click();
+  await expect(page.getByRole("heading", { name: "选择工作主机" })).toBeVisible();
+  await page.getByRole("button", { name: "配置 Agent" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: "使用测试 Agent" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.getByRole("button", { name: "开启工作区" }).click();
+  await expect(page.getByRole("heading", { name: "一起，把工作向前推进。" })).toBeVisible();
+  const input = page.getByRole("textbox", { name: "发送给 Agent 的指令" });
+  await input.fill("检查本地完整链路");
+  await page.getByRole("button", { name: "发送消息" }).click();
+  await expect(page.locator(".message.assistant")).toContainText("收到：检查本地完整链路");
+  await expect(page.locator(".chat-meta .status")).toHaveText("已完成");
+  await expect(page.locator(".markdown input[type=checkbox]").first()).toBeChecked();
+  await input.fill("/permission 写入测试");
+  await input.press("Enter");
+  await expect(page.getByText("Agent 需要你的确认")).toBeVisible();
+  await page.getByRole("button", { name: "仅允许这一次" }).click();
+  await expect(page.getByText("Agent 需要你的确认")).not.toBeVisible();
+  await expect(page.locator(".chat-meta .status")).toHaveText("已完成");
+  await input.fill("/delegate 检查子会话");
+  await input.press("Enter");
+  await expect(page.locator(".delegation-strip a")).toContainText("检查子会话");
+  await expect(page.locator(".message.assistant").last()).toContainText("测试委派结果", {
+    timeout: 20000,
+  });
+  await expect(page.locator(".chat-meta .status")).toHaveText("已完成");
+  await page.getByRole("link", { name: "会话", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "每一段工作，都有上下文。" })).toBeVisible();
+  await page.getByRole("button", { name: "新建会话", exact: true }).first().click();
+  await page.getByLabel("工作内容").fill("独立的第二项工作");
+  await page.getByRole("button", { name: "创建会话" }).click();
+  await expect(page.getByRole("heading", { name: "独立的第二项工作" })).toBeVisible();
+  await page.getByRole("textbox", { name: "发送给 Agent 的指令" }).fill("/slow 可以取消");
+  await page.getByRole("button", { name: "发送消息" }).click();
+  await page.getByRole("button", { name: "取消当前执行" }).click();
+  await expect(page.locator(".chat-meta .status")).toHaveText("已取消");
+  await page.getByRole("button", { name: "暗色主题", exact: true }).click();
+  await page.evaluate(() => document.fonts.ready);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.screenshot({
+    path: "test-results/workspace-dark.png",
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "亮色主题", exact: true }).click();
+  await page.getByRole("link", { name: "主机", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "工作，在你的设备上发生。" })).toBeVisible();
+  await page.getByRole("button", { name: "配对主机" }).click();
+  await page.getByLabel("主机名称").fill("Linux 测试主机");
+  await page.getByRole("button", { name: "生成一次性配对码" }).click();
+  await expect(page.locator(".pair-result pre")).toContainText("ACPAO_PAIR_CODE");
+  await page.getByRole("button", { name: "完成", exact: true }).click();
+  await page.getByRole("link", { name: "工作区", exact: true }).click();
+  await expect(page.locator(".message.assistant").last()).toContainText("测试委派结果");
+  await page.screenshot({
+    path: "test-results/workspace-light.png",
+    fullPage: true,
+  });
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByPlaceholder("搜索会话标题…").fill("独立的第二项工作");
+  await page.getByPlaceholder("搜索会话标题…").press("Enter");
+  await expect(page.getByRole("heading", { name: "独立的第二项工作" })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "独立的第二项工作" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "发送给 Agent 的指令" })).toBeVisible();
+  const width = await page.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth,
+    client: document.documentElement.clientWidth,
+  }));
+  expect(width.scroll).toBeLessThanOrEqual(width.client);
+  await page.screenshot({
+    path: "test-results/workspace-mobile.png",
+    fullPage: true,
+  });
+  expect(errors).toEqual([]);
+});

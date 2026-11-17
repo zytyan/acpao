@@ -1,0 +1,10 @@
+node_modules/
+dist/
+apps/web/dist/
+.data/
+.gateway/
+.env
+*.sqlite*
+playwright-report/
+test-results/
+.runtime/

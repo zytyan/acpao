@@ -1,0 +1,85 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  package:
+    name: Package ${{ matrix.platform }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            arch: x64
+            suffix: zip
+          - os: ubuntu-24.04
+            platform: linux
+            arch: x64
+            suffix: tar.gz
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            suffix: tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Assemble standalone Node.js distribution
+        shell: bash
+        run: |
+          mkdir -p stage/acpao-${{ matrix.platform }}-${{ matrix.arch }}
+          node_archive="node-v24.22.3-${{ matrix.platform }}-${{ matrix.arch }}"
+          if [ "${{ matrix.platform }}" = windows ]; then
+            curl -fsSLO "https://nodejs.org/dist/v24.22.3/${node_archive}.zip"
+            7z x "${node_archive}.zip" -ostage/node-runtime >/dev/null
+            cp stage/node-runtime/${node_archive}/node.exe stage/acpao-${{ matrix.platform }}-${{ matrix.arch }}/
+          else
+            curl -fsSLO "https://nodejs.org/dist/v24.22.3/${node_archive}.tar.xz"
+            mkdir -p stage/node-runtime
+            tar -xJf "${node_archive}.tar.xz" -C stage/node-runtime
+            cp stage/node-runtime/${node_archive}/bin/node stage/acpao-${{ matrix.platform }}-${{ matrix.arch }}/node
+          fi
+          cp package.json package-lock.json README.md stage/acpao-${{ matrix.platform }}-${{ matrix.arch }}/
+          cp -R dist apps/web/dist scripts stage/acpao-${{ matrix.platform }}-${{ matrix.arch }}/
+          cd stage/acpao-${{ matrix.platform }}-${{ matrix.arch }}
+          if [ "${{ matrix.platform }}" = windows ]; then
+            npm ci --omit=dev --ignore-scripts
+            printf '@echo off\r\nnode.exe dist\\apps\\server\\src\\main.js\r\n' > acpao.cmd
+            printf '@echo off\r\nnode.exe dist\\apps\\gateway\\src\\main.js %%*\r\n' > gateway.cmd
+            7z a "../../acpao-${{ matrix.platform }}-${{ matrix.arch }}.zip" . >/dev/null
+          else
+            npm ci --omit=dev --ignore-scripts
+            chmod +x node
+            printf '#!/bin/sh\nDIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec "$DIR/node" "$DIR/dist/apps/server/src/main.js" "$@"\n' > acpao
+            printf '#!/bin/sh\nDIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec "$DIR/node" "$DIR/dist/apps/gateway/src/main.js" "$@"\n' > gateway
+            chmod +x acpao gateway
+            tar -czf "../../acpao-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz" .
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: acpao-${{ matrix.platform }}-${{ matrix.arch }}
+          path: acpao-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.suffix }}
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: acpao-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/*
