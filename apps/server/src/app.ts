@@ -25,6 +25,7 @@ import {
   type Session,
 } from "../../../packages/core/src/types.js";
 import { RemoteHub } from "./remote.js";
+import { probeAgent } from "./probe.js";
 export interface AppOptions {
   dataDir?: string;
   root?: string;
@@ -351,13 +352,16 @@ export async function createApp(options: AppOptions = {}) {
     const p = admin(req),
       v = z.object({ agent: AgentSchema }).parse(req.body),
       h = store.host("local");
+    const probe = await probeAgent(v.agent, root);
+    store.audit(p, probe.ok ? "agent.probe.success" : "agent.probe.failure", v.agent.id);
+    if (!probe.ok) return { ok: false, probe };
     store.put("host", "local", {
       ...h,
       agents: [...h.agents.filter((a) => a.id !== v.agent.id), v.agent],
     });
     store.audit(p, "host.configure", "local");
     store.event("", "hosts", {});
-    return { ok: true };
+    return { ok: true, updated: h.agents.some((agent) => agent.id === v.agent.id), probe };
   });
   app.post("/api/hosts/pairings", async (req) => {
     const p = admin(req);

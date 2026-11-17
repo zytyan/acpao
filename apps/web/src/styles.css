@@ -1490,6 +1490,17 @@ dialog::backdrop {
   color: var(--accent);
   font-weight: 600;
 }
+.agent-probe-error {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 7px;
+  background: var(--code);
+  color: var(--danger);
+  font-size: 11px;
+}
 .checkbox {
   display: flex;
   flex-direction: row;

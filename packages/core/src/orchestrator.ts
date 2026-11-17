@@ -8,6 +8,7 @@ import {
   publicHost,
   terminal,
   type Session,
+  type AgentConfig,
   type Principal,
 } from "./types.js";
 export interface Remote {
@@ -91,6 +92,7 @@ export class Orchestrator {
       updatedAt: Date.now(),
     };
     this.store.put("session", s.id, s);
+    this.store.put("session-agent", s.id, config);
     this.store.event(s.id, "session", s);
     this.store.audit(p, "session.create", s.id);
     try {
@@ -133,7 +135,9 @@ export class Orchestrator {
     }
     if (s.host !== "local") return this.remote.call(s.host, action, { session: key });
     if (action === "cancel") return this.local.cancel(key);
-    const config = this.store.host(s.host).agents.find((a) => a.id === s.agent);
+    const config =
+      this.store.get<AgentConfig>("session-agent", s.id) ??
+      this.store.host(s.host).agents.find((a) => a.id === s.agent);
     if (!config) throw new AppError("AGENT_NOT_FOUND", "Agent 配置已移除");
     return this.local.resume(key, config);
   }

@@ -30,6 +30,33 @@ test("startup link creates a cookie and can be redeemed only once", async (t) =>
     401,
   );
 });
+test("Agent configuration is saved only after a real ACP session opens", async (t) => {
+  const c = await setup(t);
+  const missing = await c.app.inject({
+    method: "POST",
+    url: "/api/hosts/local/agent",
+    headers: { authorization: `Bearer ${adminToken}` },
+    payload: {
+      agent: { id: "missing", name: "Missing", command: "/no/such/acp-agent", args: [], env: {} },
+    },
+  });
+  assert.equal(missing.json().ok, false);
+  assert.equal(c.store.host("local").agents.some((a) => a.id === "missing"), false);
+  const mock = c.store.host("local").agents[0]!;
+  const updated = await c.app.inject({
+    method: "POST",
+    url: "/api/hosts/local/agent",
+    headers: { authorization: `Bearer ${adminToken}` },
+    payload: { agent: { ...mock, name: "Checked Agent" } },
+  });
+  assert.equal(updated.json().ok, true);
+  assert.equal(c.store.host("local").agents.find((a) => a.id === mock.id)?.name, "Checked Agent");
+  const detail = await c.app.inject({
+    url: `/api/hosts/local/agents/${mock.id}`,
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(detail.json().command, mock.command);
+});
 test("HTTP auth, cookie login, origin checks and role boundaries", async (t) => {
   const c = await setup(t);
   assert.equal((await c.app.inject("/api/sessions")).statusCode, 401);

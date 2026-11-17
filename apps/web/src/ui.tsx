@@ -237,13 +237,11 @@ export function Conversation({
 export function AgentForm({
   onSave,
   fixture,
-  onError,
   initial,
   windows,
 }: {
   onSave: (agent: Agent) => Promise<void>;
   fixture?: Agent;
-  onError: (e: unknown) => void;
   initial?: Agent;
   windows?: boolean;
 }) {
@@ -252,12 +250,14 @@ export function AgentForm({
     [env, setEnv] = useState(
       Object.entries(initial?.env ?? {}).map(([key, value]) => `${key}=${value}`).join("\n"),
     ),
-    [saving, setSaving] = useState(false);
+    [saving, setSaving] = useState(false),
+    [failure, setFailure] = useState("");
   const initialLine = useRef(line);
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
+        setFailure("");
         setSaving(true);
         try {
           const [command, ...args] = parseCommandLine(line);
@@ -274,10 +274,12 @@ export function AgentForm({
             env: parseEnvironment(env),
           };
           void onSave(a)
-            .catch(onError)
+            .catch((error) => {
+              setFailure(error instanceof Error ? error.message : "Agent 测试失败");
+            })
             .finally(() => setSaving(false));
         } catch (e) {
-          onError(e);
+          setFailure(e instanceof Error ? e.message : "启动命令有误");
           setSaving(false);
         }
       }}
@@ -306,19 +308,27 @@ export function AgentForm({
           默认继承主机环境；这里填写的变量会覆盖同名值。
         </p>
       </details>
+      {failure && <pre className="agent-probe-error" role="alert">{failure}</pre>}
       <div className="form-actions">
         {fixture && (
           <button
             type="button"
             className="text-button"
-            onClick={() => void onSave(fixture).catch(onError)}
+            disabled={saving}
+            onClick={() => {
+              setSaving(true);
+              setFailure("");
+              void onSave(fixture)
+                .catch((error) => setFailure(error instanceof Error ? error.message : "测试 Agent 无法启动"))
+                .finally(() => setSaving(false));
+            }}
           >
             使用测试 Agent
           </button>
         )}
         <button disabled={saving} className="button primary">
           {saving ? <LoaderCircle className="spin" size={16} /> : <Plus size={16} />}
-          {initial ? "保存 Agent" : "添加 Agent"}
+          {initial ? "测试并保存" : "测试并添加"}
         </button>
       </div>
     </form>

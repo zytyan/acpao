@@ -23,6 +23,8 @@ export interface RuntimeOptions {
   promptTimeoutMs?: number;
   cancelGraceMs?: number;
   bridge?: (s: Session) => acp.McpServer[];
+  onStderr?: (session: string, text: string) => void;
+  onStage?: (session: string, stage: "started" | "initialized" | "session") => void;
 }
 export class Runtime {
   private slots = new Map<string, Slot>();
@@ -104,7 +106,7 @@ export class Runtime {
       detached: process.platform !== "win32",
     });
     // Drain stderr without copying possibly sensitive agent diagnostics into logs.
-    child.stderr.on("data", () => {});
+    child.stderr.on("data", (chunk: Buffer) => this.options.onStderr?.(key, chunk.toString("utf8")));
     child.stdin.on("error", () => {});
     const connection = acp
       .client({ name: "acpao" })
@@ -130,6 +132,7 @@ export class Runtime {
       cancelled: false,
     };
     this.slots.set(key, slot);
+    this.options.onStage?.(key, "started");
     const lost = () => {
       if (slot.stopping) return;
       slot.stopping = true;
@@ -172,6 +175,7 @@ export class Runtime {
       );
       if (init.protocolVersion !== acp.PROTOCOL_VERSION)
         throw new AppError("PROTOCOL_MISMATCH", "ACP 协议版本不兼容");
+      this.options.onStage?.(key, "initialized");
       this.store.updateSession(key, {
         capabilities: {
           load: !!init.agentCapabilities?.loadSession,
@@ -203,6 +207,7 @@ export class Runtime {
         this.store.updateSession(key, { acpId: result.sessionId });
       }
       if (slot.stopping) throw new AppError("AGENT_EXITED", "Agent 初始化时退出");
+      this.options.onStage?.(key, "session");
       slot.ready = true;
       this.store.updateSession(key, { status: "idle", error: undefined });
       this.pump();

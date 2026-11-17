@@ -216,12 +216,20 @@ export default function App() {
     }
   };
   const addAgent = async (a: Agent) => {
-    await api("/hosts/local/agent", { agent: a });
+    const result = await api<{
+      ok: boolean;
+      updated?: boolean;
+      probe: { stage: string; message: string; stderr?: string };
+    }>("/hosts/local/agent", { agent: a });
+    if (!result.ok)
+      throw new Error(
+        `${result.probe.message}${result.probe.stderr ? `\n${result.probe.stderr}` : ""}`,
+      );
     await refresh();
     setAgentId(a.id);
     setModal(null);
     setEditingAgent(null);
-    setToast(editingAgent ? "Agent 配置已更新" : "Agent 已添加");
+    setToast(result.updated ? "Agent 已测试并更新" : "Agent 已测试并添加");
   };
   const editAgent = async (key: string) => {
     const agent = await api<Agent>(`/hosts/local/agents/${encodeURIComponent(key)}`);
@@ -1150,8 +1158,11 @@ export default function App() {
             initial={editingAgent ?? undefined}
             windows={hosts.find((h) => h.id === "local")?.platform === "win32"}
             onSave={addAgent}
-            fixture={editingAgent ? undefined : fixture}
-            onError={report}
+            fixture={
+              editingAgent || hosts.find((h) => h.id === "local")?.agents.some((a) => a.id === "mock")
+                ? undefined
+                : fixture
+            }
           />
           <p className="hint">测试 Agent 仅用于验证协议、流式输出和委派，不具备模型推理能力。</p>
         </Modal>

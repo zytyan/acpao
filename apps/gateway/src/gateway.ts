@@ -204,6 +204,7 @@ export class Gateway {
           if (s.host !== this.options.host) throw new AppError("HOST_FORBIDDEN", "错误的目标主机");
           const agent = this.options.agents.find((a) => a.id === (payload.agent as AgentConfig).id);
           if (!agent) throw new AppError("AGENT_NOT_FOUND", "网关未配置此 Agent");
+          this.store.put("session-agent", s.id, agent);
           await this.setupBridge(s);
           result = await this.runtime.create(s, agent, !!payload.isolate);
         } else if (action === "approve")
@@ -226,7 +227,9 @@ export class Gateway {
           else if (action === "close") result = await this.runtime.close(session);
           else {
             const s = this.store.session(session),
-              agent = this.options.agents.find((a) => a.id === s.agent);
+              agent =
+                this.store.get<AgentConfig>("session-agent", session) ??
+                this.options.agents.find((a) => a.id === s.agent);
             if (!agent) throw new AppError("AGENT_NOT_FOUND", "Agent 不可用");
             await this.setupBridge(s);
             result = await this.runtime.resume(session, agent);
