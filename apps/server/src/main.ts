@@ -9,6 +9,7 @@ if (
   !process.env.ACPAO_PUBLIC_URL?.startsWith("https://")
 )
   throw new Error("公开监听需要 ACPAO_PUBLIC_URL=https://… 并配置 TLS 反向代理");
+let runningApp: Awaited<ReturnType<typeof createApp>>["app"] | undefined;
 const { app } = await createApp({
   logger: process.env.ACPAO_LOG === "1",
   launchToken,
@@ -17,14 +18,27 @@ const { app } = await createApp({
   executable: !!process.env.ACPAO_EMBEDDED_WEB,
   demo: process.env.ACPAO_DEMO === "1",
   dataDir: process.env.ACPAO_DATA_DIR,
+  onRestart:
+    process.env.ACPAO_SUPERVISED === "1"
+      ? async () => {
+          await runningApp?.close();
+          process.exit(75);
+        }
+      : undefined,
 });
+runningApp = app;
 await app.listen({ host, port });
 const address = app.server.address();
 const actualPort = address && typeof address !== "string" ? address.port : port;
 const loopback = host === "::1" ? "[::1]" : host === "localhost" ? "localhost" : "127.0.0.1";
 const base = process.env.ACPAO_PUBLIC_URL ?? `http://${loopback}:${actualPort}`;
 const launchUrl = `${base.replace(/\/$/, "")}/#launch=${launchToken}`;
-if (openBrowser(launchUrl, process.argv.includes("--no-browser") || process.argv.includes("--print-url")))
+if (
+  openBrowser(
+    launchUrl,
+    process.argv.includes("--no-browser") || process.argv.includes("--print-url"),
+  )
+)
   console.log("已在浏览器打开工作区。\n关闭此窗口将停止服务。");
 else console.log(launchUrl);
 let stopping = false;

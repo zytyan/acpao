@@ -4,7 +4,7 @@
 
 ## 启动
 
-GitHub Release 提供 Windows x64、Linux x64、Linux ARM64 的中心程序及独立 Go Gateway 可执行文件。下载对应平台文件后直接运行，无需安装 Node.js 或 npm；中心程序首次运行会在当前目录的 `.data/runtime` 解出内置 Web 资源和服务代码，因此工作目录需要可写。Linux 先执行 `chmod +x acpao-linux-* acpao-gateway-linux-*`。有桌面浏览器时会自动打开并登录；否则终端只显示一个可复制的授权链接。加 `--no-browser` 可强制只显示链接。链接 30 分钟内可使用一次，登录后令牌从地址栏移除，身份保存在 HttpOnly Cookie。本机登录保持有效，直到主动登出、清除浏览器数据或更换管理员密钥；远程登录有效期 30 天。默认工作目录为启动程序时的当前目录，需要指定其他目录时可设置 `ACPAO_ROOT`。远程设备使用 `acpao-gateway-*`；真实 ACP Agent 及其登录凭据仍需在目标主机另行安装。
+GitHub Release 提供 Windows x64、Linux x64、Linux ARM64 的中心程序、图形启动器和独立 Go Gateway 可执行文件。下载对应平台文件后直接运行，无需安装 Node.js 或 npm；同一平台的中心程序与 `acpao-open-*` 放在同一目录。Windows 双击 `acpao-open-windows-x64.exe` 会在后台启动工作区，不留下黑色控制台；需要只打印授权 URL、排查启动错误或指定 `--no-browser` 时运行 `acpao-windows-x64.exe` 命令行程序。中心程序首次运行会在当前目录的 `.data/runtime` 解出内置 Web 资源和服务代码，因此工作目录需要可写。Linux 先执行 `chmod +x acpao-linux-* acpao-gateway-linux-* acpao-open-linux-*`。有桌面浏览器时会自动打开并登录；否则命令行程序只显示一个可复制的授权链接。链接 30 分钟内可使用一次，登录后令牌从地址栏移除，身份保存在 HttpOnly Cookie。本机登录保持有效，直到主动登出、清除浏览器数据或更换管理员密钥；远程登录有效期 30 天。默认工作目录为启动程序时的当前目录，需要指定其他目录时可设置 `ACPAO_ROOT`。远程设备使用 `acpao-gateway-*`；真实 ACP Agent 及其登录凭据仍需在目标主机另行安装。
 
 从源码运行或开发时：
 

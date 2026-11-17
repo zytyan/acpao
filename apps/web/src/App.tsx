@@ -31,7 +31,15 @@ import {
   Download,
 } from "lucide-react";
 
-import { api, busy, type Host, type Session, type ChatData, type Agent, type DiagnosticData } from "./api";
+import {
+  api,
+  busy,
+  type Host,
+  type Session,
+  type ChatData,
+  type Agent,
+  type DiagnosticData,
+} from "./api";
 import { Mark, Status, Modal, Copy, relativeTime, Conversation, AgentForm } from "./ui";
 export default function App() {
   const [auth, setAuth] = useState<boolean | null>(null),
@@ -39,7 +47,12 @@ export default function App() {
     [route, setRoute] = useState(location.hash.slice(1) || "/workspace"),
     [hosts, setHosts] = useState<Host[]>([]),
     [sessions, setSessions] = useState<Session[]>([]),
-    [config, setConfig] = useState<{ main: string | null; root: string; testFeatures: boolean }>({
+    [config, setConfig] = useState<{
+      main: string | null;
+      root: string;
+      testFeatures: boolean;
+      supervised?: boolean;
+    }>({
       main: null,
       root: "",
       testFeatures: false,
@@ -99,7 +112,9 @@ export default function App() {
       const [hs, ss, cf] = await Promise.all([
         api<Host[]>("/hosts"),
         api<Session[]>("/sessions"),
-        api<{ main: string | null; root: string; testFeatures: boolean }>("/config"),
+        api<{ main: string | null; root: string; testFeatures: boolean; supervised?: boolean }>(
+          "/config",
+        ),
       ]);
       setHosts(hs);
       setSessions(ss);
@@ -110,7 +125,8 @@ export default function App() {
   }, [report]);
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
-      if (!moreMenu.current?.contains(event.target as Node)) moreMenu.current?.removeAttribute("open");
+      if (!moreMenu.current?.contains(event.target as Node))
+        moreMenu.current?.removeAttribute("open");
     };
     const closeEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") moreMenu.current?.removeAttribute("open");
@@ -125,14 +141,20 @@ export default function App() {
   useEffect(() => {
     if (modal !== "diagnostics") return;
     const timer = setInterval(() => {
-      void api<DiagnosticData>("/diagnostics").then((fresh) =>
-        setDiagnostics((old) => ({
-          ...fresh,
-          logs: [...new Map([...fresh.logs, ...(old?.logs ?? [])].map((log) => [log.id, log])).values()]
-            .sort((a, b) => b.id - a.id)
-            .slice(0, 1000),
-        })),
-      ).catch(report);
+      void api<DiagnosticData>("/diagnostics")
+        .then((fresh) =>
+          setDiagnostics((old) => ({
+            ...fresh,
+            logs: [
+              ...new Map(
+                [...fresh.logs, ...(old?.logs ?? [])].map((log) => [log.id, log]),
+              ).values(),
+            ]
+              .sort((a, b) => b.id - a.id)
+              .slice(0, 1000),
+          })),
+        )
+        .catch(report);
     }, 5000);
     return () => clearInterval(timer);
   }, [modal, report]);
@@ -779,14 +801,33 @@ export default function App() {
               </div>
             )}
             <div className="composer-area">
-              {chat?.queuedCommands?.length && currentSession?.capabilities?.steering && busy(currentSession.status) ? (
+              {chat?.queuedCommands?.length &&
+              currentSession?.capabilities?.steering &&
+              busy(currentSession.status) ? (
                 <div className="queued-steering">
                   {chat.queuedCommands.map((command) => (
                     <div key={command.id}>
                       <span title={command.text}>等待发送：{command.text}</span>
-                      <button type="button" onClick={() => void api<{ delivery: string }>(`/sessions/${sessionId}/queue/${command.id}/steer`, {})
-                        .then((result) => { setToast(result.delivery === "steering" ? "已引导当前执行" : "当前不能引导，消息仍在队列中"); return refreshChat(); })
-                        .catch(report)}>转为引导</button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void api<{ delivery: string }>(
+                            `/sessions/${sessionId}/queue/${command.id}/steer`,
+                            {},
+                          )
+                            .then((result) => {
+                              setToast(
+                                result.delivery === "steering"
+                                  ? "已引导当前执行"
+                                  : "当前不能引导，消息仍在队列中",
+                              );
+                              return refreshChat();
+                            })
+                            .catch(report)
+                        }
+                      >
+                        转为引导
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -862,8 +903,14 @@ export default function App() {
                   </span>
                   <div>
                     {busy(currentSession?.status) && currentSession?.capabilities?.steering && (
-                      <button type="button" className="steer-button" disabled={!text.trim() || working}
-                        onClick={() => void send(undefined, "steer")}>引导当前执行</button>
+                      <button
+                        type="button"
+                        className="steer-button"
+                        disabled={!text.trim() || working}
+                        onClick={() => void send(undefined, "steer")}
+                      >
+                        引导当前执行
+                      </button>
                     )}
                     {busy(currentSession?.status) && (
                       <button
@@ -1194,7 +1241,11 @@ export default function App() {
         </Modal>
       )}
       {modal === "agent" && (
-        <Modal title={editingAgent ? "编辑 ACP Agent" : "连接 ACP Agent"} backdropClose={false} onClose={() => setModal(null)}>
+        <Modal
+          title={editingAgent ? "编辑 ACP Agent" : "连接 ACP Agent"}
+          backdropClose={false}
+          onClose={() => setModal(null)}
+        >
           {detected.length > 0 && (
             <div className="detected">
               <p>检测到以下启动程序（尚未验证登录状态）</p>
@@ -1217,12 +1268,15 @@ export default function App() {
             windows={hosts.find((h) => h.id === "local")?.platform === "win32"}
             onSave={addAgent}
             fixture={
-              editingAgent || hosts.find((h) => h.id === "local")?.agents.some((a) => a.id === "mock")
+              editingAgent ||
+              hosts.find((h) => h.id === "local")?.agents.some((a) => a.id === "mock")
                 ? undefined
                 : fixture
             }
           />
-          {config.testFeatures && <p className="hint">测试 Agent 仅用于验证协议、流式输出和委派，不具备模型推理能力。</p>}
+          {config.testFeatures && (
+            <p className="hint">测试 Agent 仅用于验证协议、流式输出和委派，不具备模型推理能力。</p>
+          )}
         </Modal>
       )}
       {modal === "pair" && (
@@ -1350,20 +1404,56 @@ export default function App() {
               checked={diagnostics?.testFeatures ?? false}
               onChange={(event) => {
                 const enabled = event.target.checked;
-                setDiagnostics((old) => old ? { ...old, testFeatures: enabled } : old);
+                setDiagnostics((old) => (old ? { ...old, testFeatures: enabled } : old));
                 setConfig((old) => ({ ...old, testFeatures: enabled }));
                 void api("/settings/test-features", { enabled })
                   .then(() => {
                     void detect();
                   })
                   .catch((error) => {
-                    setDiagnostics((old) => old ? { ...old, testFeatures: !enabled } : old);
+                    setDiagnostics((old) => (old ? { ...old, testFeatures: !enabled } : old));
                     setConfig((old) => ({ ...old, testFeatures: !enabled }));
                     report(error);
                   });
               }}
             />
           </div>
+          {config.supervised && (
+            <div className="diagnostic-settings">
+              <div>
+                <strong>重启中心</strong>
+                <p>先等待本机 Agent 完成当前工作，再重启服务。远程 Gateway 会自动重连。</p>
+              </div>
+              <button
+                type="button"
+                className="button"
+                onClick={() => {
+                  void api<{ status: string }>("/system/restart", {})
+                    .then(() => {
+                      setToast("已安排重启，当前工作完成后会自动恢复连接");
+                      setModal(null);
+                      void (async () => {
+                        let disconnected = false;
+                        for (let attempt = 0; attempt < 720; attempt++) {
+                          await new Promise((resolve) => setTimeout(resolve, 1000));
+                          const ready = await fetch("/api/auth", { cache: "no-store" })
+                            .then((r) => r.ok)
+                            .catch(() => false);
+                          if (!ready) disconnected = true;
+                          if (disconnected && ready) {
+                            location.reload();
+                            return;
+                          }
+                        }
+                      })();
+                    })
+                    .catch(report);
+                }}
+              >
+                等待完成后重启
+              </button>
+            </div>
+          )}
           <div className="diagnostic-filters">
             <input
               aria-label="搜索日志"
@@ -1371,7 +1461,11 @@ export default function App() {
               value={logSearch}
               onChange={(event) => setLogSearch(event.target.value)}
             />
-            <select aria-label="日志级别" value={logLevel} onChange={(event) => setLogLevel(event.target.value)}>
+            <select
+              aria-label="日志级别"
+              value={logLevel}
+              onChange={(event) => setLogLevel(event.target.value)}
+            >
               <option value="all">全部</option>
               <option value="error">错误</option>
               <option value="warning">提示</option>
@@ -1379,32 +1473,47 @@ export default function App() {
             </select>
           </div>
           <div className="diagnostic-list">
-            {diagnostics?.logs.filter((log) =>
-              (logLevel === "all" || log.level === logLevel) &&
-              `${log.message} ${log.agent ?? ""} ${log.session ?? ""} ${log.code}`
-                .toLowerCase()
-                .includes(logSearch.toLowerCase()),
-            ).map((log) => (
-              <details className={`diagnostic-entry ${log.level}`} key={log.id}>
-                <summary>
-                  <span>{new Date(log.createdAt).toLocaleString()}</span>
-                  <strong>{log.message.split("\n")[0]}</strong>
-                  <small>{log.agent ?? log.source}</small>
-                </summary>
-                <pre>{log.message}</pre>
-                <p>{log.code}{log.session ? ` · ${log.session}` : ""}</p>
-              </details>
-            ))}
+            {diagnostics?.logs
+              .filter(
+                (log) =>
+                  (logLevel === "all" || log.level === logLevel) &&
+                  `${log.message} ${log.agent ?? ""} ${log.session ?? ""} ${log.code}`
+                    .toLowerCase()
+                    .includes(logSearch.toLowerCase()),
+              )
+              .map((log) => (
+                <details className={`diagnostic-entry ${log.level}`} key={log.id}>
+                  <summary>
+                    <span>{new Date(log.createdAt).toLocaleString()}</span>
+                    <strong>{log.message.split("\n")[0]}</strong>
+                    <small>{log.agent ?? log.source}</small>
+                  </summary>
+                  <pre>{log.message}</pre>
+                  <p>
+                    {log.code}
+                    {log.session ? ` · ${log.session}` : ""}
+                  </p>
+                </details>
+              ))}
             {diagnostics?.logs.length === 0 && <p className="hint">还没有诊断记录。</p>}
           </div>
           {diagnostics?.logs.length && diagnostics.logs.length < 1000 ? (
-            <button className="text-button" onClick={() => {
-              const before = diagnostics.logs.at(-1)?.id;
-              if (!before) return;
-              void api<DiagnosticData>(`/diagnostics?before=${before}`).then((older) =>
-                setDiagnostics((current) => current ? { ...current, logs: [...current.logs, ...older.logs] } : current),
-              ).catch(report);
-            }}>查看更早记录</button>
+            <button
+              className="text-button"
+              onClick={() => {
+                const before = diagnostics.logs.at(-1)?.id;
+                if (!before) return;
+                void api<DiagnosticData>(`/diagnostics?before=${before}`)
+                  .then((older) =>
+                    setDiagnostics((current) =>
+                      current ? { ...current, logs: [...current.logs, ...older.logs] } : current,
+                    ),
+                  )
+                  .catch(report);
+              }}
+            >
+              查看更早记录
+            </button>
           ) : null}
         </Modal>
       )}

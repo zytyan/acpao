@@ -37,7 +37,9 @@ jobs:
           suffix=""
           if [ "$RUNNER_OS" = Windows ]; then suffix=".exe"; fi
           CGO_ENABLED=0 go build -buildvcs=false -o "$GITHUB_WORKSPACE/gateway-go$suffix" .
-          echo "GO_GATEWAY_BIN=$GITHUB_WORKSPACE/gateway-go$suffix" >> "$GITHUB_ENV"
+          CGO_ENABLED=0 go build -buildvcs=false -o "$GITHUB_WORKSPACE/acpao-launcher$suffix" ./launcher
+          "$GITHUB_WORKSPACE/gateway-go$suffix" --version
+          if [ "$RUNNER_OS" != Windows ]; then echo "GO_GATEWAY_BIN=$GITHUB_WORKSPACE/gateway-go$suffix" >> "$GITHUB_ENV"; fi
       - run: npm run typecheck
       - run: npm run build
       - if: runner.os != 'Windows'

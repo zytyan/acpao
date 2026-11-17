@@ -2,6 +2,8 @@
 
 ## 中心
 
+Release 的 `acpao-open-*` 是受监督的 UI 启动器。Windows 构建为 GUI 子系统，启动中心时隐藏控制台；直接运行 `acpao-windows-x64.exe` 保留命令行输出，适合无浏览器设备与故障排查。启动器与同平台中心二进制必须放在同一目录。诊断页提供“等待完成后重启”：中心停止接收新写入、等待本机 Prompt 完成、退出后由启动器重新启动。远程 Gateway 在这段时间继续本地工作并重连。启动器不会记录带授权 token 的启动 URL。
+
 先运行 `npm ci && npm run build`。建议以专门 OS 用户运行 Node，项目、Agent 凭据、工作根目录与 SQLite 目录都由该账户管理，避免用 root 运行生产 Agent。
 
 环境变量：

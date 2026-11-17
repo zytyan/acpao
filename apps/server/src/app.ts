@@ -39,6 +39,7 @@ export interface AppOptions {
   publicUrl?: string;
   logger?: boolean;
   promptTimeoutMs?: number;
+  onRestart?: () => Promise<void>;
 }
 const descriptions: Record<ToolName, string> = {
   delegate:
@@ -50,6 +51,7 @@ const descriptions: Record<ToolName, string> = {
 };
 export async function createApp(options: AppOptions = {}) {
   const streams = new Set<ServerResponse>();
+  let draining = false;
   const project = resolve(options.projectRoot ?? process.cwd()),
     root = resolve(options.root ?? process.env.ACPAO_ROOT ?? project),
     data = resolve(options.dataDir ?? ".data");
@@ -204,6 +206,12 @@ export async function createApp(options: AppOptions = {}) {
     });
   });
   app.addHook("onRequest", async (req, reply) => {
+    if (
+      draining &&
+      !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
+      req.url.split("?")[0] !== "/api/system/restart"
+    )
+      throw new AppError("RESTARTING", "服务正在等待当前工作完成后重启", 503);
     reply
       .header("X-Content-Type-Options", "nosniff")
       .header("Referrer-Policy", "no-referrer")
@@ -283,12 +291,60 @@ export async function createApp(options: AppOptions = {}) {
       main: store.get<string>("setting", "main") ?? null,
       root,
       testFeatures: store.get<boolean>("setting", "test-features") ?? false,
+      supervised: !!options.onRestart,
       capabilities: {
         steering: false,
         sshBootstrap: false,
         processIsolation: "one-process-per-session",
       },
     };
+  });
+  app.post("/api/system/restart", async (req) => {
+    const p = admin(req);
+    if (!options.onRestart)
+      throw new AppError("RESTART_UNAVAILABLE", "请由系统服务管理器重启当前进程", 409);
+    if (draining) return { status: "draining" };
+    draining = true;
+    store.audit(p, "system.restart", "center");
+    store.diagnostic({
+      level: "info",
+      source: "system",
+      code: "RESTART_REQUESTED",
+      message: "正在等待本机 Prompt 完成后重启中心",
+    });
+    setImmediate(() => {
+      void (async () => {
+        const deadline = Date.now() + 11 * 60_000;
+        while (
+          Date.now() < deadline &&
+          store
+            .commands(undefined, "running")
+            .some((c) => store.session(c.session).host === "local")
+        )
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+              store.changes.off("event", wake);
+              resolve();
+            }, 1000);
+            const wake = () => {
+              clearTimeout(timer);
+              store.changes.off("event", wake);
+              resolve();
+            };
+            store.changes.on("event", wake);
+          });
+        await options.onRestart!();
+      })().catch((error) => {
+        draining = false;
+        store.diagnostic({
+          level: "error",
+          source: "system",
+          code: "RESTART_FAILED",
+          message: error instanceof Error ? error.message : "重启失败",
+        });
+      });
+    });
+    return { status: "draining" };
   });
   app.post("/api/main", async (req) => {
     const p = admin(req),
