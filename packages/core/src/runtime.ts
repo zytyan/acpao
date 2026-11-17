@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Store, id } from "./store.js";
 import { agentEnvironment } from "./agent-command.js";
+import { detectExtensions, SteeringRequest, SteeringResponse, STEERING_METHOD } from "./acp-extensions.js";
 import { AppError, type Session, type AgentConfig, type Command, type Approval } from "./types.js";
 interface Slot {
   process: ChildProcessWithoutNullStreams;
@@ -49,7 +50,7 @@ export class Runtime {
         processId: undefined,
         error: "执行端已重启；未自动重放正在执行的指令。",
       });
-    for (const c of store.commands().filter((c) => ["running", "queued"].includes(c.status)))
+    for (const c of store.commands().filter((c) => ["running", "queued", "steering"].includes(c.status)))
       store.command({ ...c, status: "interrupted" });
     for (const a of store.approvals()) store.approval({ ...a, status: "cancelled" });
   }
@@ -208,7 +209,7 @@ export class Runtime {
       this.store.updateSession(key, {
         capabilities: {
           load: !!init.agentCapabilities?.loadSession,
-          steering: false,
+          steering: detectExtensions(init._meta).steering,
         },
         processId: child.pid,
       });
@@ -287,7 +288,7 @@ export class Runtime {
       this.store.event(key, "acp.update", { run, update });
     });
   }
-  submit(key: string, text: string, mode = "auto", requestId = id("cmd")) {
+  async submit(key: string, text: string, mode = "auto", requestId = id("cmd")) {
     const existing = this.store.get<Command>("command", requestId);
     if (existing) {
       if (existing.session !== key || existing.text !== text)
@@ -303,13 +304,10 @@ export class Runtime {
       slot = this.slots.get(key);
     if (!slot?.ready || ["closed", "error", "interrupted"].includes(s.status))
       throw new AppError("SESSION_UNAVAILABLE", "会话当前不可用，请恢复或创建会话", 409);
-    if (mode === "steer")
-      throw new AppError(
-        "STEERING_UNSUPPORTED",
-        "此稳定 ACP 适配器不支持 Steering；可显式选择 queue",
-        409,
-      );
     const busy = !!slot.active || this.store.commands(key, "queued").length > 0;
+    if (mode === "steer" && (!s.capabilities?.steering || !slot.active))
+      throw new AppError("STEERING_UNSUPPORTED", !s.capabilities?.steering
+        ? "此 Agent 未声明支持 Steering" : "当前没有可引导的执行，请正常发送 Prompt", 409);
     if (mode === "immediate" && (busy || this.runningCount() >= (this.options.maxConcurrent ?? 4)))
       throw new AppError("SESSION_BUSY", "当前无法立即执行", 409);
     if (this.store.commands(key, "queued").length >= 100)
@@ -331,6 +329,10 @@ export class Runtime {
         });
       this.store.event(key, "queued", { command: requestId, text });
     });
+    const shouldSteer = !!slot.active && s.capabilities?.steering && (mode === "steer" || mode === "auto");
+    if (shouldSteer) {
+      return this.promote(key, requestId, mode === "steer");
+    }
     const immediate = !busy && this.runningCount() < (this.options.maxConcurrent ?? 4);
     this.pump();
     return {
@@ -339,6 +341,44 @@ export class Runtime {
       delivery: immediate ? "immediate" : "queued",
       status: this.store.session(key).status,
     };
+  }
+  async promote(key: string, commandId: string, strict = false) {
+    const slot = this.slots.get(key);
+    const session = this.store.session(key);
+    const command = this.store.get<Command>("command", commandId);
+    if (!command || command.session !== key || command.status !== "queued")
+      throw new AppError("COMMAND_NOT_QUEUED", "该消息已不在队列中", 409);
+    if (!session.capabilities?.steering || !slot?.active || !slot.ready)
+      throw new AppError("STEERING_UNSUPPORTED", "当前会话不支持将排队消息转为引导", 409);
+    this.store.command({ ...command, status: "steering" });
+    try {
+      const params = SteeringRequest.parse({
+        sessionId: session.acpId!, prompt: [{ type: "text", text: command.text }],
+        _meta: { steering: { idleBehavior: "promptRequired" } },
+      });
+      const raw = await slot.connection.agent.request(STEERING_METHOD, params, {
+        cancellationSignal: AbortSignal.timeout(15000), stopWaitingOnCancel: true,
+      });
+      const response = SteeringResponse.parse(raw);
+      if (response.outcome === "injected") {
+        this.store.command({ ...command, status: "completed" });
+        this.store.event(key, "steered", { command: commandId });
+        return { session: key, command: commandId, delivery: "steering", status: session.status };
+      }
+      this.store.command({ ...command, status: strict ? "failed" : "queued" });
+      if (!strict) this.pump();
+      if (strict) throw new AppError("STEERING_NOT_APPLIED", "Agent 未接收引导；请使用普通发送或排队", 409);
+      return { session: key, command: commandId, delivery: "queued", status: session.status, reason: response.outcome };
+    } catch (error) {
+      if (this.store.get<Command>("command", commandId)?.status === "steering")
+        this.store.command({ ...command, status: strict ? "failed" : "queued" });
+      this.store.diagnostic({ level: "warning", source: "acp", code: "STEERING_FAILED",
+        message: error instanceof Error ? error.message : "ACP 引导请求失败", session: key, agent: session.agent });
+      if (!strict) this.pump();
+      if (error instanceof AppError) throw error;
+      if (strict) throw new AppError("STEERING_FAILED", "ACP 引导请求失败，请检查诊断记录", 409);
+      return { session: key, command: commandId, delivery: "queued", status: session.status, reason: "failed" };
+    }
   }
   private runningCount() {
     return [...this.slots.values()].filter((s) => s.active).length;

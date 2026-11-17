@@ -10,11 +10,12 @@ const app = acp
   .onRequest(acp.methods.agent.initialize, () => ({
     protocolVersion: acp.PROTOCOL_VERSION,
     agentCapabilities: { loadSession: process.env.MOCK_LOAD === "1" },
+    _meta: process.env.MOCK_STEERING === "1" ? { steering: { supported: true } } : {},
     agentInfo: { name: "Deterministic test agent", version: "1.0" },
   }))
   .onRequest(acp.methods.agent.session.new, ({ params }) => {
     const sessionId = "mock-session";
-    sessions.set(sessionId, { cancelled: false, mcp: params.mcpServers });
+    sessions.set(sessionId, { cancelled: false, running: false, mcp: params.mcpServers });
     return { sessionId };
   })
   .onRequest(acp.methods.agent.session.load, ({ params }) => {
@@ -28,9 +29,20 @@ const app = acp
     const s = sessions.get(params.sessionId);
     if (s) s.cancelled = true;
   })
+  .onRequest("_session/steering", (value) => value, async ({ params, client }) => {
+    const s = sessions.get(params.sessionId);
+    if (!s?.running) return { outcome: "promptRequired", reason: "noRunningTurn" };
+    const text = params.prompt.map((p) => p.text).join("");
+    await client.notify(acp.methods.client.session.update, {
+      sessionId: params.sessionId,
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `\n已收到引导：${text}\n` } },
+    });
+    return { outcome: "injected" };
+  })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     const s = sessions.get(params.sessionId);
     s.cancelled = false;
+    s.running = true;
     const text = params.prompt
       .filter((x) => x.type === "text")
       .map((x) => x.text)
@@ -38,6 +50,7 @@ const app = acp
     if (text === "/crash") process.exit(17);
     if (text.startsWith("/hang")) {
       await pause(60000);
+      s.running = false;
       return { stopReason: "end_turn" };
     }
     if (text.startsWith("/permission")) {
@@ -106,6 +119,7 @@ const app = acp
       });
       await pause(text.startsWith("/slow") ? 60 : 5);
     }
+    s.running = false;
     return { stopReason: s.cancelled ? "cancelled" : "end_turn" };
   });
 app.connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));

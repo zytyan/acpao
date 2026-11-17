@@ -217,7 +217,7 @@ export class Gateway {
           if (this.store.session(session).host !== this.options.host)
             throw new AppError("HOST_FORBIDDEN", "错误的会话");
           if (action === "send")
-            result = this.runtime.submit(
+            result = await this.runtime.submit(
               session,
               z.string().min(1).max(100000).parse(payload.text),
               z.enum(["auto", "queue", "steer", "immediate"]).default("auto").parse(payload.mode),

@@ -497,6 +497,7 @@ export async function createApp(options: AppOptions = {}) {
       messages: store.messages(key, query.before),
       approvals: store.approvals(key),
       queued: store.commands(key, "queued").length,
+      queuedCommands: store.commands(key, "queued").map((c) => ({ id: c.id, text: c.text })),
       delegations: store
         .sessions()
         .filter((s) => s.parent === key)
@@ -513,6 +514,14 @@ export async function createApp(options: AppOptions = {}) {
       admin(req),
     ),
   );
+  app.post("/api/sessions/:session/queue/:command/steer", async (req) => {
+    const p = admin(req), params = req.params as { session: string; command: string };
+    const s = store.session(params.session);
+    orchestration.authorize(p, s);
+    if (s.host !== "local") throw new AppError("STEERING_REMOTE_UNAVAILABLE", "远程 Gateway 尚未支持队列转引导", 409);
+    store.audit(p, "session.queue.steer", s.id);
+    return runtime.promote(s.id, params.command);
+  });
   for (const action of ["cancel", "close", "resume"] as const)
     app.post(`/api/sessions/:session/${action}`, async (req) =>
       orchestration.action((req.params as { session: string }).session, action, admin(req)),

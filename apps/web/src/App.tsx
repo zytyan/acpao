@@ -296,7 +296,7 @@ export default function App() {
       setWorking(false);
     }
   };
-  const send = async (e?: FormEvent) => {
+  const send = async (e?: FormEvent, mode: "auto" | "steer" = "auto") => {
     e?.preventDefault();
     if (!sessionId || !text.trim() || working) return;
     setWorking(true);
@@ -304,11 +304,12 @@ export default function App() {
     try {
       const result = await api<{ delivery: string }>(`/sessions/${sessionId}/send`, {
         text: content,
-        mode: "auto",
+        mode,
         requestId: crypto.randomUUID(),
       });
       setText("");
       if (result.delivery === "queued") setToast("已加入队列，将在当前工作结束后发送");
+      if (result.delivery === "steering") setToast("已引导当前执行");
       await refreshChat();
     } catch (e) {
       report(e);
@@ -778,6 +779,18 @@ export default function App() {
               </div>
             )}
             <div className="composer-area">
+              {chat?.queuedCommands?.length && currentSession?.capabilities?.steering && busy(currentSession.status) ? (
+                <div className="queued-steering">
+                  {chat.queuedCommands.map((command) => (
+                    <div key={command.id}>
+                      <span title={command.text}>等待发送：{command.text}</span>
+                      <button type="button" onClick={() => void api<{ delivery: string }>(`/sessions/${sessionId}/queue/${command.id}/steer`, {})
+                        .then((result) => { setToast(result.delivery === "steering" ? "已引导当前执行" : "当前不能引导，消息仍在队列中"); return refreshChat(); })
+                        .catch(report)}>转为引导</button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               {chat?.delegations.length ? (
                 <div className="delegation-strip">
                   {chat.delegations.map((d) => (
@@ -848,6 +861,10 @@ export default function App() {
                       "工作目录"}
                   </span>
                   <div>
+                    {busy(currentSession?.status) && currentSession?.capabilities?.steering && (
+                      <button type="button" className="steer-button" disabled={!text.trim() || working}
+                        onClick={() => void send(undefined, "steer")}>引导当前执行</button>
+                    )}
                     {busy(currentSession?.status) && (
                       <button
                         type="button"

@@ -1212,6 +1212,11 @@ select {
   justify-content: space-between;
   margin-top: 10px;
 }
+.queued-steering { display: grid; gap: 6px; padding: 0 4px 10px; }
+.queued-steering > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); }
+.queued-steering span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queued-steering button, .steer-button { border: 0; background: transparent; color: var(--accent); cursor: pointer; white-space: nowrap; font: inherit; }
+.queued-steering button:hover, .steer-button:hover { text-decoration: underline; }
 .composer-bottom > span {
   font-size: 10px;
   display: flex;

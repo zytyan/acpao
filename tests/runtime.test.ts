@@ -95,6 +95,26 @@ test("strong steering and immediate semantics reject instead of silently queuing
     (v) => v === "cancelled",
   );
 });
+test("advertised Steering injects an active turn and can promote a queued message", async (t) => {
+  const c = await setup(t);
+  const host = c.store.host("local");
+  host.agents.push({ id: "steer-mock", name: "Steering fixture", command: process.execPath,
+    args: [resolve(process.cwd(), "scripts/mock-agent.mjs")], env: { MOCK_STEERING: "1" } });
+  c.store.put("host", host.id, host);
+  const s = await c.orchestration.create({ cwd: c.root, agent: "steer-mock" }, owner);
+  assert.equal(s.capabilities?.steering, true);
+  await c.orchestration.send({ session: s.id, text: "/hang" }, owner);
+  await until(() => c.store.session(s.id).status, (status) => status === "running");
+  const queued = await c.orchestration.send({ session: s.id, text: "queued steer", mode: "queue", requestId: "queued-steer-id" }, owner);
+  assert.equal((queued as { delivery: string }).delivery, "queued");
+  const promoted = await c.runtime.promote(s.id, "queued-steer-id");
+  assert.equal(promoted.delivery, "steering");
+  assert.equal(c.store.get<Command>("command", "queued-steer-id")?.status, "completed");
+  const direct = await c.orchestration.send({ session: s.id, text: "direct steer", mode: "steer" }, owner);
+  assert.equal((direct as { delivery: string }).delivery, "steering");
+  assert.equal(c.store.commands(s.id, "queued").length, 0);
+  await c.orchestration.action(s.id, "close", owner);
+});
 test("agent process exit interrupts its session, without affecting peers", async (t) => {
   const c = await setup(t),
     a = await create(c),

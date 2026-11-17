@@ -41,7 +41,7 @@ export interface Session {
   status: SessionStatus;
   acpId?: string;
   processId?: number;
-  capabilities?: { load: boolean; steering: false };
+  capabilities?: { load: boolean; steering: boolean };
   parent?: string;
   createdAt: number;
   updatedAt: number;
@@ -78,7 +78,7 @@ export interface Command {
   id: string;
   session: string;
   text: string;
-  status: "queued" | "running" | "completed" | "cancelled" | "failed" | "interrupted";
+  status: "queued" | "steering" | "running" | "completed" | "cancelled" | "failed" | "interrupted";
   createdAt: number;
 }
 export interface Approval {

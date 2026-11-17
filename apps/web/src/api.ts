@@ -24,7 +24,7 @@ export interface Session {
   status: string;
   updatedAt: number;
   error?: string;
-  capabilities?: { load: boolean };
+  capabilities?: { load: boolean; steering: boolean };
   parent?: string;
 }
 export interface Message {
@@ -54,6 +54,7 @@ export interface ChatData {
     agent: string;
   }[];
   queued?: number;
+  queuedCommands?: { id: string; text: string }[];
 }
 export interface Diagnostic {
   id: number;
