@@ -296,6 +296,13 @@ export async function createApp(options: AppOptions = {}) {
     admin(req);
     return store.all<Host>("host").map(publicHost);
   });
+  app.get("/api/hosts/local/agents/:agent", async (req) => {
+    admin(req);
+    const key = (req.params as { agent: string }).agent;
+    const agent = store.host("local").agents.find((item) => item.id === key);
+    if (!agent) throw new AppError("AGENT_NOT_FOUND", "Agent 配置不存在", 404);
+    return agent;
+  });
   app.get("/api/agents/detect", async (req) => {
     admin(req);
     const candidates = [

@@ -13,6 +13,12 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { statusName, busy, type Message, type ChatData, type Agent } from "./api";
+import { CommandEditor } from "./CommandEditor";
+import {
+  formatCommandLine,
+  parseCommandLine,
+  parseEnvironment,
+} from "../../../packages/core/src/agent-command";
 export function Mark({ small = false }: { small?: boolean }) {
   return (
     <span className={`brand-mark ${small ? "small" : ""}`} aria-hidden="true">
@@ -232,32 +238,40 @@ export function AgentForm({
   onSave,
   fixture,
   onError,
+  initial,
+  windows,
 }: {
   onSave: (agent: Agent) => Promise<void>;
   fixture?: Agent;
   onError: (e: unknown) => void;
+  initial?: Agent;
+  windows?: boolean;
 }) {
-  const [name, setName] = useState("Codex ACP"),
-    [command, setCommand] = useState("codex-acp"),
-    [args, setArgs] = useState("[]"),
-    [env, setEnv] = useState("{}"),
+  const [name, setName] = useState(initial?.name ?? "Codex ACP"),
+    [line, setLine] = useState(formatCommandLine(initial?.command ?? "codex-acp", initial?.args)),
+    [env, setEnv] = useState(
+      Object.entries(initial?.env ?? {}).map(([key, value]) => `${key}=${value}`).join("\n"),
+    ),
     [saving, setSaving] = useState(false);
+  const initialLine = useRef(line);
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         setSaving(true);
         try {
+          const [command, ...args] = parseCommandLine(line);
           const a: Agent = {
-            id:
+            id: initial?.id ?? (
               name
                 .toLowerCase()
                 .replace(/[^a-z0-9_-]/g, "-")
-                .slice(0, 64) || "agent",
+                .slice(0, 64) || "agent"
+            ),
             name,
             command,
-            args: JSON.parse(args),
-            env: JSON.parse(env),
+            args,
+            env: parseEnvironment(env),
           };
           void onSave(a)
             .catch(onError)
@@ -273,13 +287,8 @@ export function AgentForm({
         <input value={name} onChange={(e) => setName(e.target.value)} required />
       </label>
       <label>
-        ACP 启动程序
-        <input
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          required
-          placeholder="/usr/local/bin/codex-acp"
-        />
+        启动命令
+        <CommandEditor initial={initialLine.current} windows={!!windows} onChange={setLine} />
       </label>
       <p className="hint">
         使用支持 ACP 的适配器。普通 Codex / Claude CLI 不一定提供 ACP
@@ -287,18 +296,14 @@ export function AgentForm({
       </p>
       <details className="advanced">
         <summary>
-          启动参数与环境变量 <ChevronDown size={14} />
+          环境变量 <ChevronDown size={14} />
         </summary>
         <label>
-          参数（JSON 数组）
-          <input value={args} onChange={(e) => setArgs(e.target.value)} />
-        </label>
-        <label>
-          环境变量（JSON 对象）
+          每行一个 NAME=值，可引用 $NAME
           <textarea value={env} onChange={(e) => setEnv(e.target.value)} />
         </label>
         <p className="hint">
-          仅启动配置中的变量会传入 Agent。凭据保存在受限的本地数据库，请使用专门的运行账户。
+          默认继承主机环境；这里填写的变量会覆盖同名值。
         </p>
       </details>
       <div className="form-actions">
@@ -313,7 +318,7 @@ export function AgentForm({
         )}
         <button disabled={saving} className="button primary">
           {saving ? <LoaderCircle className="spin" size={16} /> : <Plus size={16} />}
-          添加 Agent
+          {initial ? "保存 Agent" : "添加 Agent"}
         </button>
       </div>
     </form>

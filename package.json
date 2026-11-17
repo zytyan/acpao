@@ -23,6 +23,11 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "2.7.0",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
     "@fastify/cookie": "11.1.5",
     "@fastify/rate-limit": "11.2.2",
     "@fastify/static": "10.1.11",

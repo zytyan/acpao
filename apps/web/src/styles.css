@@ -1442,6 +1442,54 @@ dialog::backdrop {
 .advanced textarea {
   font-family: monospace;
 }
+.command-editor-wrap {
+  position: relative;
+  margin-top: 7px;
+}
+.command-editor {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.command-editor:focus-within {
+  border-color: var(--accent);
+}
+.command-editor .cm-editor {
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: var(--text);
+  background: transparent;
+}
+.command-editor .cm-editor.cm-focused {
+  outline: none;
+}
+.command-editor .cm-content {
+  min-height: 38px;
+  padding: 8px 10px;
+}
+.command-editor .cm-cursor {
+  border-left-color: var(--text);
+}
+.command-editor .cm-selectionBackground {
+  background: var(--hover) !important;
+}
+.command-edit-bubble {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 7px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--code);
+  color: var(--muted);
+  font-size: 11px;
+}
+.command-edit-bubble button {
+  color: var(--accent);
+  font-weight: 600;
+}
 .checkbox {
   display: flex;
   flex-direction: row;

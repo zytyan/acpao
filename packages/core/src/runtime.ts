@@ -6,6 +6,7 @@ import { resolve, relative, isAbsolute } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Store, id } from "./store.js";
+import { agentEnvironment } from "./agent-command.js";
 import { AppError, type Session, type AgentConfig, type Command, type Approval } from "./types.js";
 interface Slot {
   process: ChildProcessWithoutNullStreams;
@@ -98,13 +99,7 @@ export class Runtime {
     this.store.updateSession(key, { status: "creating", error: undefined });
     const child = spawn(config.command, config.args, {
       cwd: s.cwd,
-      env: {
-        PATH: process.env.PATH,
-        HOME: process.env.HOME,
-        LANG: process.env.LANG,
-        TERM: "dumb",
-        ...config.env,
-      },
+      env: agentEnvironment(config.env, process.env, process.platform),
       stdio: "pipe",
       detached: process.platform !== "win32",
     });

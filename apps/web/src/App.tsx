@@ -19,6 +19,7 @@ import {
   X,
   Square,
   Terminal,
+  Pencil,
   Folder,
   Link,
   ShieldCheck,
@@ -54,6 +55,7 @@ export default function App() {
     [search, setSearch] = useState(""),
     [theme, setTheme] = useState(localStorage.getItem("acpao-theme") ?? "system"),
     [fixture, setFixture] = useState<Agent>(),
+    [editingAgent, setEditingAgent] = useState<Agent | null>(null),
     [detected, setDetected] = useState<Agent[]>([]),
     [working, setWorking] = useState(false),
     [text, setText] = useState(""),
@@ -218,7 +220,13 @@ export default function App() {
     await refresh();
     setAgentId(a.id);
     setModal(null);
-    setToast("Agent 已添加");
+    setEditingAgent(null);
+    setToast(editingAgent ? "Agent 配置已更新" : "Agent 已添加");
+  };
+  const editAgent = async (key: string) => {
+    const agent = await api<Agent>(`/hosts/local/agents/${encodeURIComponent(key)}`);
+    setEditingAgent(agent);
+    setModal("agent");
   };
   const openCreate = () => {
     setHostId("local");
@@ -627,6 +635,7 @@ export default function App() {
                         setToast("请在远程 Gateway 配置文件中添加 Agent 后重启");
                         navigate("/hosts");
                       } else {
+                        setEditingAgent(null);
                         void detect();
                         setModal("agent");
                       }
@@ -935,6 +944,15 @@ export default function App() {
                         <Terminal size={15} />
                         <span>{a.name}</span>
                         <span>ACP</span>
+                        {h.kind === "local" && (
+                          <button
+                            className="icon-button"
+                            aria-label={`编辑 ${a.name}`}
+                            onClick={() => void editAgent(a.id).catch(report)}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        )}
                       </div>
                     ))}
                     {h.agents.length === 0 && <p>尚未配置 ACP Agent</p>}
@@ -948,6 +966,7 @@ export default function App() {
                       <button
                         className="subtle-button"
                         onClick={() => {
+                          setEditingAgent(null);
                           void detect();
                           setModal("agent");
                         }}
@@ -1109,7 +1128,7 @@ export default function App() {
         </Modal>
       )}
       {modal === "agent" && (
-        <Modal title="连接 ACP Agent" onClose={() => setModal(null)}>
+        <Modal title={editingAgent ? "编辑 ACP Agent" : "连接 ACP Agent"} onClose={() => setModal(null)}>
           {detected.length > 0 && (
             <div className="detected">
               <p>检测到以下启动程序（尚未验证登录状态）</p>
@@ -1126,7 +1145,14 @@ export default function App() {
               ))}
             </div>
           )}
-          <AgentForm onSave={addAgent} fixture={fixture} onError={report} />
+          <AgentForm
+            key={editingAgent?.id ?? "new"}
+            initial={editingAgent ?? undefined}
+            windows={hosts.find((h) => h.id === "local")?.platform === "win32"}
+            onSave={addAgent}
+            fixture={editingAgent ? undefined : fixture}
+            onError={report}
+          />
           <p className="hint">测试 Agent 仅用于验证协议、流式输出和委派，不具备模型推理能力。</p>
         </Modal>
       )}
