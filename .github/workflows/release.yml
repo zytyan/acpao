@@ -1,7 +1,7 @@
 name: Release
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
   workflow_dispatch:
 permissions:
   contents: write
@@ -37,7 +37,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p stage/acpao-${{ matrix.platform }}-${{ matrix.arch }}
-          node_archive="node-v24.22.3-${{ matrix.platform }}-${{ matrix.arch }}"
+          node_platform="${{ matrix.platform }}"
+          if [ "$node_platform" = windows ]; then node_platform=win; fi
+          node_archive="node-v24.22.3-${node_platform}-${{ matrix.arch }}"
           if [ "${{ matrix.platform }}" = windows ]; then
             curl -fsSLO "https://nodejs.org/dist/v24.22.3/${node_archive}.zip"
             7z x "${node_archive}.zip" -ostage/node-runtime >/dev/null
