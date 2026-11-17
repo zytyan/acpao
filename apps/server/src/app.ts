@@ -3,6 +3,7 @@ import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import staticFiles from "@fastify/static";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerAcpHttp } from "./acp-http.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { resolve } from "node:path";
@@ -207,7 +208,7 @@ export async function createApp(options: AppOptions = {}) {
       .header("X-Content-Type-Options", "nosniff")
       .header("Referrer-Policy", "no-referrer")
       .header("X-Frame-Options", "DENY");
-    if (req.url.startsWith("/api") || req.url.startsWith("/mcp"))
+    if (req.url.startsWith("/api") || req.url.startsWith("/mcp") || req.url.startsWith("/acp"))
       reply.header("Cache-Control", "no-store");
     if (req.headers.origin) {
       const allowed = new Set([
@@ -221,7 +222,8 @@ export async function createApp(options: AppOptions = {}) {
     if (
       (req.url.startsWith("/api/") &&
         !["/api/login", "/api/auth", "/api/gateway/pair"].includes(req.url.split("?")[0]!)) ||
-      req.url.startsWith("/mcp")
+      req.url.startsWith("/mcp") ||
+      req.url.startsWith("/acp")
     )
       principal(req);
   });
@@ -340,13 +342,15 @@ export async function createApp(options: AppOptions = {}) {
     }
     return {
       agents: detected,
-      fixture: store.get<boolean>("setting", "test-features") ? {
-        id: "mock",
-        name: "测试 Agent · 不调用模型",
-        command: process.execPath,
-        args: options.executable ? [] : [resolve(project, "scripts/mock-agent.mjs")],
-        env: options.executable ? { ACPAO_SEA_MODE: "mock-agent" } : {},
-      } : null,
+      fixture: store.get<boolean>("setting", "test-features")
+        ? {
+            id: "mock",
+            name: "测试 Agent · 不调用模型",
+            command: process.execPath,
+            args: options.executable ? [] : [resolve(project, "scripts/mock-agent.mjs")],
+            env: options.executable ? { ACPAO_SEA_MODE: "mock-agent" } : {},
+          }
+        : null,
     };
   });
   app.put("/api/hosts/local/agents", async (req) => {
@@ -375,7 +379,13 @@ export async function createApp(options: AppOptions = {}) {
       agent: v.agent.id,
     });
     if (!probe.ok && probe.stderr)
-      store.diagnostic({ level: "error", source: "probe", code: "AGENT_PROBE_STDERR", message: probe.stderr, agent: v.agent.id });
+      store.diagnostic({
+        level: "error",
+        source: "probe",
+        code: "AGENT_PROBE_STDERR",
+        message: probe.stderr,
+        agent: v.agent.id,
+      });
     store.audit(p, probe.ok ? "agent.probe.success" : "agent.probe.failure", v.agent.id);
     if (!probe.ok) return { ok: false, probe };
     store.put("host", "local", {
@@ -516,10 +526,12 @@ export async function createApp(options: AppOptions = {}) {
     ),
   );
   app.post("/api/sessions/:session/queue/:command/steer", async (req) => {
-    const p = admin(req), params = req.params as { session: string; command: string };
+    const p = admin(req),
+      params = req.params as { session: string; command: string };
     const s = store.session(params.session);
     orchestration.authorize(p, s);
-    if (s.host !== "local") throw new AppError("STEERING_REMOTE_UNAVAILABLE", "远程 Gateway 尚未支持队列转引导", 409);
+    if (s.host !== "local")
+      throw new AppError("STEERING_REMOTE_UNAVAILABLE", "远程 Gateway 尚未支持队列转引导", 409);
     store.audit(p, "session.queue.steer", s.id);
     return runtime.promote(s.id, params.command);
   });
@@ -652,7 +664,9 @@ export async function createApp(options: AppOptions = {}) {
   });
   app.get("/api/diagnostics", async (req) => {
     admin(req);
-    const { before } = z.object({ before: z.coerce.number().int().positive().optional() }).parse(req.query);
+    const { before } = z
+      .object({ before: z.coerce.number().int().positive().optional() })
+      .parse(req.query);
     return {
       logs: store.diagnostics(before),
       audit: store.db.prepare("SELECT * FROM audit ORDER BY id DESC LIMIT 100").all(),
@@ -664,6 +678,7 @@ export async function createApp(options: AppOptions = {}) {
       testFeatures: store.get<boolean>("setting", "test-features") ?? false,
     };
   });
+  registerAcpHttp(app, store, orchestration, admin);
   const web = resolve(
     process.env.ACPAO_EMBEDDED_WEB ?? project,
     process.env.ACPAO_EMBEDDED_WEB ? "" : "apps/web/dist",
@@ -671,7 +686,7 @@ export async function createApp(options: AppOptions = {}) {
   if (existsSync(web)) {
     await app.register(staticFiles, { root: web, prefix: "/" });
     app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith("/api/") || req.url.startsWith("/mcp"))
+      if (req.url.startsWith("/api/") || req.url.startsWith("/mcp") || req.url.startsWith("/acp"))
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "接口不存在" } });
       return reply.sendFile("index.html");
     });

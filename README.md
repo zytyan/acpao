@@ -78,7 +78,7 @@ npm run test:ui
 | `sessions` | list/get/history/create/cancel/close/resume。无恢复能力时返回明确错误。                                                    |
 | `hosts`    | 只返回授权主机的简短信息，不返回命令、环境变量或密钥。                                                                     |
 
-MCP 同时提供 Streamable HTTP `/mcp`，需要 Bearer 身份；ACP 内使用自动配置的 stdio 桥。REST `/api/tools/:tool` 与 MCP 共享 Schema、授权和审计。人类 UI 的管理接口要求管理员身份。
+MCP 提供 Streamable HTTP `/mcp`；ACP 客户端可通过 Streamable HTTP `/acp` 连接中心，两者都需要授权。`/acp` 支持文本 Prompt、流式消息、Session 创建/加载和取消；外部 ACP 客户端传入自己的 MCP Server 或非文本 Prompt 会收到明确错误。REST `/api/tools/:tool` 与 MCP 共享 Schema、授权和审计。
 
 同一会话最多排队 100 条；默认同时执行 4 个 Prompt、最多保持 32 个本地 ACP 进程。Agent 同源会话默认最多直接委派 16 个未关闭后代。取消会清空该 Session 的队列；Agent 3 秒未确认取消时终止进程。单次 Prompt 最长 10 分钟。恢复会话不等于自动重放中断的 Prompt。
 

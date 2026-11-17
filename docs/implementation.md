@@ -2,7 +2,7 @@
 
 本文件的早期阶段记录仍保留在下方；当前新增能力以本节为准。Go Gateway 已从中心二进制分离，Release 会分别提供 Windows x64、Linux x64/ARM64 可执行文件。Agent 配置支持编辑、启动前测试、Shell 风格命令和环境变量输入；日志与诊断可查询 180 天。ACP `_session/steering` 依据 Agent initialize `_meta` 探测后启用，可将排队消息转为引导。支持 `session/load` 的本地 Agent 进程退出后会尝试自动恢复历史会话，正在执行的 Prompt 不重放。
 
-Go Gateway 使用独立 SQLite 持久化指令回执和有序事件，断线后继续本地执行并补发事件；worker 重启时将未完成指令标记中断，支持历史恢复。支持 `ssh -J` 跳板与独立 manager/worker 模式，Docker 使用前台模式。远端 ACP Agent 通过 Go 内置 stdio MCP 桥调用中心工具。Go Gateway 的本机端到端测试覆盖配对、会话、委派、断线、去重及重启恢复；公开 TLS、真实 SSH 跳板与跨机器部署仍待现场验证。Go Gateway 暂不支持自动 Git worktree 分配，选择该选项会明确报错。
+Go Gateway 使用独立 SQLite 持久化指令回执和有序事件，断线后继续本地执行并补发事件；worker 重启时将未完成指令标记中断，支持历史恢复。支持 `ssh -J` 跳板与独立 manager/worker 模式，Docker 使用前台模式。远端 ACP Agent 通过 Go 内置 stdio MCP 桥调用中心工具。Go Gateway 的本机端到端测试覆盖配对、会话、委派、断线、去重及重启恢复；公开 TLS、真实 SSH 跳板与跨机器部署仍待现场验证。Go Gateway 暂不支持自动 Git worktree 分配，选择该选项会明确报错。中心另通过官方 SDK 的 Streamable HTTP transport 提供 `/acp`，已用官方 HTTP 客户端完成真实 Session、流式输出和授权测试。
 
 ## 1. 本地闭环：已实现并验证
 
@@ -38,7 +38,7 @@ Go Gateway 使用独立 SQLite 持久化指令回执和有序事件，断线后�
 - SSH 自动上传和部署 Gateway，远程自动安装 Agent。
 - Web 内交互式 Agent 登录；首次认证仍在主机终端完成。
 - SSH 私钥管理、企业多租户、自动任务规划、DAG、VPN/NAT 协议（均不在此 MVP）。
-- ACP HTTP(S) 入口仍待实现；目前 `/mcp` 是 MCP HTTP 入口，不应称作 ACP。
+- ACP HTTP 入口暂只支持文本 Prompt；外部 MCP Server 配置和非文本内容会明确报错。
 - 运行中 Prompt 的进程级容错或自动重放；Agent 历史恢复依赖真实能力。
 - Docker 镜像与真实远端公开证书部署现场验收。
 - 完整事件历史的自动归档导入、自动清除工作树和 Session 数据；目前保留去重回执与可读历史供追溯。
