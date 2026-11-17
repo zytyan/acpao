@@ -127,6 +127,20 @@ test("agent process exit interrupts its session, without affecting peers", async
   assert.equal(c.store.session(b.id).status, "idle");
   assert.equal(c.store.commands(a.id)[0]?.status, "interrupted");
 });
+test("Agent process restart loads an advertised session without replaying a crashed prompt", async (t) => {
+  const c = await setup(t);
+  const host = c.store.host("local");
+  host.agents.push({ id: "reload-mock", name: "Reload fixture", command: process.execPath,
+    args: [resolve(process.cwd(), "scripts/mock-agent.mjs")], env: { MOCK_LOAD: "1" } });
+  c.store.put("host", host.id, host);
+  const s = await c.orchestration.create({ cwd: c.root, agent: "reload-mock" }, owner);
+  assert.equal(s.capabilities?.load, true);
+  await c.orchestration.send({ session: s.id, text: "/crash" }, owner);
+  await until(() => c.store.session(s.id).status, (status) => status === "interrupted");
+  await until(() => c.store.session(s.id).status, (status) => status === "idle", 12000);
+  assert.equal(c.store.commands(s.id)[0]?.status, "interrupted");
+  assert.equal(c.store.commands(s.id).length, 1);
+});
 test("human approval is required; cancelling resolves pending protocol permissions", async (t) => {
   const c = await setup(t),
     s = await create(c);

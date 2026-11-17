@@ -129,6 +129,7 @@ export async function createApp(options: AppOptions = {}) {
     return t;
   };
   const runtime = new Runtime(store, {
+    autoRecover: true,
     host: "local",
     root,
     promptTimeoutMs: options.promptTimeoutMs,

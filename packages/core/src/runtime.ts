@@ -24,6 +24,7 @@ export interface RuntimeOptions {
   promptTimeoutMs?: number;
   cancelGraceMs?: number;
   bridge?: (s: Session) => acp.McpServer[];
+  autoRecover?: boolean;
   onStderr?: (session: string, text: string) => void;
   onStage?: (session: string, stage: "started" | "initialized" | "session") => void;
 }
@@ -38,6 +39,7 @@ export class Runtime {
     }
   >();
   private stopping = false;
+  private recovery = new Map<string, NodeJS.Timeout>();
   constructor(
     readonly store: Store,
     readonly options: RuntimeOptions,
@@ -53,6 +55,37 @@ export class Runtime {
     for (const c of store.commands().filter((c) => ["running", "queued", "steering"].includes(c.status)))
       store.command({ ...c, status: "interrupted" });
     for (const a of store.approvals()) store.approval({ ...a, status: "cancelled" });
+    if (options.autoRecover) {
+      const timer = setTimeout(() => {
+        if (this.stopping) return;
+        for (const session of store.sessions().filter((s) => s.host === options.host && s.status === "interrupted"))
+          this.scheduleRecovery(session.id);
+      }, 250);
+      timer.unref();
+    }
+  }
+  private scheduleRecovery(key: string, attempt = 0) {
+    if (this.stopping || !this.options.autoRecover || this.recovery.has(key)) return;
+    const session = this.store.session(key);
+    if (!session.acpId || !session.capabilities?.load || session.status === "closed") return;
+    const timer = setTimeout(() => {
+      this.recovery.delete(key);
+      if (this.stopping) return;
+      const current = this.store.session(key);
+      if (current.status === "closed" || this.slots.has(key)) return;
+      const config = this.store.get<AgentConfig>("session-agent", key);
+      if (!config) return;
+      void this.resume(key, config).then(() => {
+        this.store.diagnostic({ level: "info", source: "acp", code: "ACP_RECOVERED",
+          message: "已重新连接 Agent 并加载历史会话；中断的 Prompt 未重放", session: key, agent: config.id });
+      }).catch((error) => {
+        this.store.diagnostic({ level: "warning", source: "acp", code: "ACP_RECOVERY_FAILED",
+          message: error instanceof Error ? error.message : "历史恢复失败", session: key, agent: config.id });
+        if (attempt < 2) this.scheduleRecovery(key, attempt + 1);
+      });
+    }, Math.min(1000 * 2 ** attempt, 8000));
+    timer.unref();
+    this.recovery.set(key, timer);
   }
   async directory(cwd: string, isolate = false) {
     if (!isAbsolute(cwd)) throw new AppError("INVALID_DIRECTORY", "工作目录必须是绝对路径");
@@ -163,6 +196,7 @@ export class Runtime {
     this.options.onStage?.(key, "started");
     const lost = () => {
       if (slot.stopping) return;
+      const wasReady = slot.ready;
       flushStderr(true);
       this.store.diagnostic({ level: "error", source: "agent", code: "ACP_EXIT", message: `Agent 进程或 ACP 连接已退出${child.exitCode === null ? "" : `，退出码 ${child.exitCode}`}`, session: key, agent: config.id });
       slot.stopping = true;
@@ -183,6 +217,7 @@ export class Runtime {
       }
       this.discardQueue(key);
       this.pump();
+      if (wasReady) this.scheduleRecovery(key);
     };
     child.once("error", lost);
     child.once("exit", lost);
@@ -558,6 +593,9 @@ export class Runtime {
     this.slots.delete(key);
   }
   async close(key: string) {
+    const recovery = this.recovery.get(key);
+    if (recovery) clearTimeout(recovery);
+    this.recovery.delete(key);
     await this.cancel(key);
     const active = this.slots.get(key)?.active;
     if (active) {
@@ -570,6 +608,8 @@ export class Runtime {
   }
   async shutdown() {
     this.stopping = true;
+    for (const timer of this.recovery.values()) clearTimeout(timer);
+    this.recovery.clear();
     for (const key of [...this.slots.keys()]) {
       const slot = this.slots.get(key)!;
       if (slot.active) {
