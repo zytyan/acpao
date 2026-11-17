@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -42,6 +43,31 @@ type gateway struct {
 	cursor    int64
 	stopped   bool
 	draining  bool
+}
+
+var bearerSecret = regexp.MustCompile(`(?i)Bearer\s+\S+`)
+var secretName = regexp.MustCompile(`(?i)(TOKEN|SECRET|PASSWORD|API_KEY|AUTH)`)
+
+func (g *gateway) diagnostic(level, code, message, session, agent string) {
+	message = strings.ReplaceAll(message, g.config.Token, "[已隐藏]")
+	for _, item := range os.Environ() {
+		parts := strings.SplitN(item, "=", 2)
+		if len(parts) == 2 && secretName.MatchString(parts[0]) && len(parts[1]) >= 6 {
+			message = strings.ReplaceAll(message, parts[1], "[已隐藏]")
+		}
+	}
+	for _, configured := range g.config.Agents {
+		for key, value := range configured.Env {
+			if secretName.MatchString(key) && len(value) >= 6 {
+				message = strings.ReplaceAll(message, value, "[已隐藏]")
+			}
+		}
+	}
+	message = bearerSecret.ReplaceAllString(message, "Bearer [已隐藏]")
+	if len(message) > 8192 {
+		message = message[:8192]
+	}
+	g.emit(session, "diagnostic", map[string]string{"level": level, "source": "gateway", "code": code, "message": message, "session": session, "agent": agent})
 }
 
 func newGateway(c config, s *store) *gateway {
@@ -121,6 +147,7 @@ func (g *gateway) run(ctx context.Context) error {
 		err := g.connect(ctx)
 		if err != nil {
 			slog.Warn("center disconnected", "error", err)
+			g.diagnostic("warning", "CENTER_DISCONNECTED", err.Error(), "", "")
 		}
 		g.mu.Lock()
 		g.ready = false
@@ -371,6 +398,7 @@ func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireErr
 		_ = g.store.put("session-agent", s.ID, agent)
 		g.emit(s.ID, "session", s)
 		if err := g.launch(&s, *agent, false); err != nil {
+			g.diagnostic("error", "ACP_CONNECT_FAILED", err.Error(), s.ID, agent.ID)
 			g.updateSession(&s, "error", err.Error())
 			return fail("ACP_CONNECT_FAILED", err.Error())
 		}

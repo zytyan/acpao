@@ -4,6 +4,7 @@ import { Readable, Writable } from "node:stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 const sessions = new Map();
+if (process.env.MOCK_STDERR) console.error(process.env.MOCK_STDERR, process.env.MOCK_TOKEN ?? "");
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 const app = acp
   .agent({ name: "ACPAO Test Agent" })

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -29,7 +28,7 @@ type store struct {
 }
 
 func openStore(path string) (*store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := secureStateDirectory(filepath.Dir(path)); err != nil {
 		return nil, err
 	}
 	db, err := sql.Open("sqlite", path)
@@ -47,7 +46,10 @@ func openStore(path string) (*store, error) {
 		return nil, err
 	}
 	_, _ = db.Exec(`UPDATE receipts SET status='done',error='{"code":"INTERRUPTED","message":"Gateway restarted while executing this command; it was not replayed"}' WHERE status='executing'`)
-	_ = os.Chmod(path, 0600)
+	if err = secureStateFile(path); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &store{db: db}, nil
 }
 

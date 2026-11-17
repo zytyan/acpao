@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, readFile, mkdtemp, rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { setup, until, owner, project, adminToken } from "./helpers.js";
 
 test(
@@ -41,7 +42,8 @@ test(
             name: "Go remote mock",
             command: process.execPath,
             args: [resolve(project, "scripts/mock-agent.mjs")],
-            env: { MOCK_LOAD: "1", MOCK_STEERING: "1" },
+            env: { MOCK_LOAD: "1", MOCK_STEERING: "1", MOCK_STDERR: "remote stderr sentinel",
+              MOCK_TOKEN: "remote-secret-value-123" },
           },
         ],
       }),
@@ -75,6 +77,13 @@ test(
     ).catch(() => {
       throw new Error(stderr);
     });
+    const diagnostic = await until(
+      () => c.store.diagnostics().find((entry) => entry.message.includes("remote stderr sentinel")),
+      (entry) => !!entry,
+      10000,
+    );
+    assert.match(diagnostic!.message, /\[已隐藏\]/);
+    assert.doesNotMatch(diagnostic!.message, /remote-secret-value-123/);
     const sent = (await c.orchestration.send(
       { session: session.id, text: "hello from Go gateway", requestId: "go-gateway-command" },
       owner,
@@ -152,8 +161,8 @@ test(
       15000,
     );
     const before = c.store.db
-      .prepare("SELECT COUNT(*) n FROM events WHERE origin=?")
-      .get(identity.host) as { n: number };
+      .prepare("SELECT COUNT(*) n, MAX(originSeq) cursor FROM events WHERE origin=?")
+      .get(identity.host) as { n: number; cursor: number };
     for (const peer of c.remote.wss.clients) peer.terminate();
     await until(
       () => c.store.host(identity.host).status,
@@ -165,8 +174,8 @@ test(
       15000,
     );
     const after = c.store.db
-      .prepare("SELECT COUNT(*) n FROM events WHERE origin=?")
-      .get(identity.host) as { n: number };
+      .prepare("SELECT COUNT(*) n FROM events WHERE origin=? AND originSeq<=?")
+      .get(identity.host, before.cursor) as { n: number };
     assert.equal(after.n, before.n);
     child.kill();
     await new Promise<void>((done) => child?.once("exit", () => done()));
@@ -190,6 +199,21 @@ test(
     child = undefined;
   },
 );
+
+test("Go Gateway --daemon detaches a manager and --stop ends it", { skip: !process.env.GO_GATEWAY_BIN }, async (t) => {
+  const folder = await mkdtemp(resolve(tmpdir(), "acpao-go-daemon-"));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const file = resolve(folder, "config.json");
+  await writeFile(file, JSON.stringify({ center: "http://127.0.0.1:9", host: "test", token: "long-enough-test-token",
+    root: folder, agents: [], insecureLocal: true }));
+  const launch = spawn(process.env.GO_GATEWAY_BIN!, ["--daemon", "--config", file]);
+  assert.equal(await new Promise<number | null>((done) => launch.once("exit", done)), 0);
+  const pidFile = resolve(folder, "manager.pid");
+  await until(() => readFile(pidFile, "utf8").catch(() => ""), (value) => Number(value) > 0, 10000);
+  const stop = spawn(process.env.GO_GATEWAY_BIN!, ["--stop", "--config", file]);
+  assert.equal(await new Promise<number | null>((done) => stop.once("exit", done)), 0);
+  await until(() => readFile(pidFile, "utf8").then(() => false).catch(() => true), Boolean, 10000);
+});
 
 test(
   "Go Gateway manager drains an active Prompt before staged upgrade",
@@ -230,7 +254,7 @@ test(
         ],
       }),
     );
-    const manager = spawn(process.env.GO_GATEWAY_BIN!, ["--daemon", "--config", file], {
+    const manager = spawn(process.env.GO_GATEWAY_BIN!, ["--manager", "--config", file], {
       stdio: "pipe",
     });
     let stderr = "";

@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -398,7 +397,13 @@ func (g *gateway) launch(s *session, config agentConfig, restore bool) error {
 	}
 	cmd := exec.Command(config.Command, config.Args...)
 	cmd.Dir = cwd
-	cmd.Env = os.Environ()
+	cmd.Env = []string{}
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if name != "ACPAO_ADMIN_TOKEN" && name != "ACPAO_PAIR_CODE" && name != "ACPAO_TOKEN" {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
 	for key, value := range config.Env {
 		cmd.Env = append(cmd.Env, key+"="+os.ExpandEnv(value))
 	}
@@ -425,7 +430,7 @@ func (g *gateway) launch(s *session, config agentConfig, restore bool) error {
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			slog.Warn("agent stderr", "session", s.ID, "text", scanner.Text())
+			g.diagnostic("warning", "AGENT_STDERR", scanner.Text(), s.ID, config.ID)
 		}
 	}()
 	go func() {
@@ -442,7 +447,7 @@ func (g *gateway) launch(s *session, config agentConfig, restore bool) error {
 		if !wasClosed {
 			g.updateSession(s, "interrupted", "Agent 进程退出；执行中的指令未重放。")
 		}
-		slog.Info("agent exited", "session", s.ID, "error", err)
+		g.diagnostic("warning", "ACP_EXIT", fmt.Sprint(err), s.ID, config.ID)
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

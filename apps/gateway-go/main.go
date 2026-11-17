@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -34,7 +35,9 @@ func start() error {
 	file := flag.String("config", os.Getenv("ACPAO_GATEWAY_CONFIG"), "Gateway configuration path")
 	pair := flag.Bool("pair", false, "pair device with center")
 	foreground := flag.Bool("foreground", false, "run worker in foreground (Docker)")
-	daemon := flag.Bool("daemon", false, "run manager which restarts the worker")
+	daemon := flag.Bool("daemon", false, "detach a manager which restarts the worker")
+	manager := flag.Bool("manager", false, "run manager in foreground")
+	stopManagerFlag := flag.Bool("stop", false, "stop the detached manager")
 	worker := flag.Bool("worker", false, "internal manager child")
 	version := flag.Bool("version", false, "print Gateway protocol version")
 	upgrade := flag.String("upgrade", "", "stage a new Gateway executable for the manager")
@@ -52,6 +55,9 @@ func start() error {
 	if *upgrade != "" {
 		return stageUpgrade(path, *upgrade)
 	}
+	if *stopManagerFlag {
+		return stopManager(path)
+	}
 	if *pair {
 		return pairDevice(path)
 	}
@@ -61,7 +67,10 @@ func start() error {
 	if *exportIdentity != "" {
 		return transferIdentity(path, *exportIdentity, true)
 	}
-	if *daemon && !(*foreground || *worker) {
+	if *daemon && !(*foreground || *worker || *manager) {
+		return spawnManager(path)
+	}
+	if *manager {
 		return supervise(path)
 	}
 	data, err := os.ReadFile(path)
@@ -166,11 +175,14 @@ func pairDevice(path string) error {
 			return err
 		}
 	}
-	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err = secureStateDirectory(filepath.Dir(path)); err != nil {
 		return err
 	}
 	data, _ := json.MarshalIndent(c, "", "  ")
 	if err = os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+	if err = secureStateFile(path); err != nil {
 		return err
 	}
 	fmt.Println("Gateway paired. Configure agents in", path)
@@ -187,7 +199,10 @@ func transferIdentity(configFile, identityFile string, export bool) error {
 	}
 	if export {
 		value, _ := json.MarshalIndent(map[string]string{"host": c.Host, "token": c.Token}, "", "  ")
-		return os.WriteFile(identityFile, value, 0600)
+		if err = os.WriteFile(identityFile, value, 0600); err != nil {
+			return err
+		}
+		return secureStateFile(identityFile)
 	}
 	data, err = os.ReadFile(identityFile)
 	if err != nil {
@@ -209,11 +224,19 @@ func transferIdentity(configFile, identityFile string, export bool) error {
 	if err = os.WriteFile(temp, data, 0600); err != nil {
 		return err
 	}
+	if err = secureStateFile(temp); err != nil {
+		return err
+	}
 	return os.Rename(temp, configFile)
 }
 func supervise(path string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	pidFile := filepath.Join(filepath.Dir(path), "manager.pid")
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprint(os.Getpid())), 0600); err != nil {
+		return err
+	}
+	defer os.Remove(pidFile)
 	for ctx.Err() == nil {
 		self, err := activeBinary(path)
 		if err != nil {
@@ -235,6 +258,40 @@ func supervise(path string) error {
 		}
 	}
 	return nil
+}
+func spawnManager(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(self, "--manager", "--config", path)
+	cmd.Dir = filepath.Dir(path)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	detachManager(cmd)
+	if err = cmd.Start(); err != nil {
+		return err
+	}
+	fmt.Println("Gateway manager started, PID", cmd.Process.Pid)
+	return cmd.Process.Release()
+}
+func stopManager(path string) error {
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(path), "manager.pid"))
+	if err != nil {
+		return err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return err
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return signalManager(process)
 }
 
 func activeFile(path string) string { return filepath.Join(filepath.Dir(path), "active-binary") }

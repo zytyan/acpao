@@ -240,6 +240,13 @@ export class RemoteHub {
           throw new Error("foreign approval");
         this.store.put("approval", a.id, a);
       }
+      if (e.kind === "diagnostic") {
+        const detail = e.data as { level?: string; code?: string; message?: string; agent?: string };
+        if (["info", "warning", "error"].includes(detail.level ?? "") && typeof detail.message === "string")
+          this.store.diagnostic({ level: detail.level as "info" | "warning" | "error", source: "gateway",
+            code: String(detail.code ?? "GATEWAY_EVENT").slice(0, 80), message: detail.message.slice(0, 8192),
+            session: e.session || undefined, agent: detail.agent });
+      }
       this.store.event(e.session, e.kind, e.data, host, e.seq);
       this.store.put("gateway-cursor", host, e.seq);
     });
