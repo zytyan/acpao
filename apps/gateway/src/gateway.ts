@@ -35,6 +35,7 @@ export class Gateway {
     readonly store: Store,
     readonly options: GatewayOptions,
     readonly projectRoot: string,
+    readonly executable = false,
   ) {
     const url = new URL(options.center);
     if (
@@ -157,10 +158,13 @@ export class Gateway {
       {
         name: "acpao",
         command: process.execPath,
-        args: [resolve(this.projectRoot, "scripts/mcp-bridge.mjs")],
+        args: this.executable
+          ? []
+          : [resolve(this.projectRoot, "scripts/mcp-bridge.mjs")],
         env: [
           { name: "ACPAO_CENTER", value: this.options.center },
           { name: "ACPAO_TOKEN", value: token },
+          ...(this.executable ? [{ name: "ACPAO_SEA_MODE", value: "mcp-bridge" }] : []),
         ],
       },
     ]);

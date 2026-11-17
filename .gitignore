@@ -8,3 +8,4 @@ apps/web/dist/
 playwright-report/
 test-results/
 .runtime/
+sea-build/

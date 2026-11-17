@@ -18,7 +18,8 @@
     "gateway:start": "node dist/apps/gateway/src/main.js",
     "format": "prettier --write apps packages scripts tests docs README.md *.json *.ts",
     "probe:agent": "node --import tsx scripts/probe-agent.ts",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test && npm run build",
+    "build:binary": "npm run build && node scripts/sea/build.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "2.7.0",
@@ -45,6 +46,8 @@
     "@types/react-dom": "19.3.0",
     "@types/ws": "8.18.2",
     "@vitejs/plugin-react": "6.3.0",
+    "esbuild": "0.28.2",
+    "postject": "1.0.0-alpha.6",
     "prettier": "3.10.1",
     "tailwindcss": "4.3.5",
     "tsx": "4.23.15",

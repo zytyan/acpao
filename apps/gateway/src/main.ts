@@ -67,7 +67,12 @@ if (importIndex >= 0) {
 }
 const config = GatewayConfig.parse(JSON.parse(readFileSync(file, "utf8"))),
   store = new Store(resolve(dirname(file), "gateway.sqlite")),
-  gateway = new Gateway(store, config, project);
+  gateway = new Gateway(
+    store,
+    config,
+    process.env.ACPAO_EMBEDDED_RUNTIME ?? project,
+    !!process.env.ACPAO_EMBEDDED_WEB,
+  );
 gateway.start();
 console.log(
   JSON.stringify({

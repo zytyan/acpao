@@ -4,6 +4,10 @@
 
 ## 启动
 
+GitHub Release 提供 Windows x64、Linux x64、Linux ARM64 的单个可执行文件。下载对应平台文件后直接运行，无需安装 Node.js 或 npm；程序首次运行会在当前目录的 `.data/runtime` 解出内置 Web 资源和服务代码，因此工作目录需要可写。Linux 先执行 `chmod +x acpao-linux-*`，Windows 可直接运行 `acpao-windows-x64.exe`。默认访问 `http://127.0.0.1:4310`，登录密钥位于 `.data/admin-token`。远程设备上运行同一个文件并传入 `gateway` 参数可启动 Gateway；仍需按下文配置配对环境变量。真实 ACP Agent 及其登录凭据需要在目标主机另行安装和配置。
+
+从源码运行或开发时：
+
 需要 **Node.js 24+**、npm 和 Linux/macOS。首次安装：
 
 ```bash

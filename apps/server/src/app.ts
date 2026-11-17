@@ -29,6 +29,7 @@ export interface AppOptions {
   dataDir?: string;
   root?: string;
   projectRoot?: string;
+  executable?: boolean;
   adminToken?: string;
   demo?: boolean;
   publicUrl?: string;
@@ -95,8 +96,8 @@ export async function createApp(options: AppOptions = {}) {
               id: "mock",
               name: "测试 Agent · 不调用模型",
               command: process.execPath,
-              args: [resolve(project, "scripts/mock-agent.mjs")],
-              env: {},
+              args: options.executable ? [] : [resolve(project, "scripts/mock-agent.mjs")],
+              env: options.executable ? { ACPAO_SEA_MODE: "mock-agent" } : {},
             },
           ]
         : [],
@@ -125,7 +126,7 @@ export async function createApp(options: AppOptions = {}) {
       {
         name: "acpao",
         command: process.execPath,
-        args: [resolve(project, "scripts/mcp-bridge.mjs")],
+        args: options.executable ? [] : [resolve(project, "scripts/mcp-bridge.mjs")],
         env: [
           {
             name: "ACPAO_CENTER",
@@ -134,6 +135,7 @@ export async function createApp(options: AppOptions = {}) {
               `http://127.0.0.1:${(app.server.address() as { port: number } | null)?.port ?? 4310}`,
           },
           { name: "ACPAO_TOKEN", value: agentToken(s) },
+          ...(options.executable ? [{ name: "ACPAO_SEA_MODE", value: "mcp-bridge" }] : []),
         ],
       },
     ],
@@ -296,8 +298,8 @@ export async function createApp(options: AppOptions = {}) {
         id: "mock",
         name: "测试 Agent · 不调用模型",
         command: process.execPath,
-        args: [resolve(project, "scripts/mock-agent.mjs")],
-        env: {},
+        args: options.executable ? [] : [resolve(project, "scripts/mock-agent.mjs")],
+        env: options.executable ? { ACPAO_SEA_MODE: "mock-agent" } : {},
       },
     };
   });
@@ -589,7 +591,10 @@ export async function createApp(options: AppOptions = {}) {
       retentionDays: 30,
     };
   });
-  const web = resolve(project, "apps/web/dist");
+  const web = resolve(
+    process.env.ACPAO_EMBEDDED_WEB ?? project,
+    process.env.ACPAO_EMBEDDED_WEB ? "" : "apps/web/dist",
+  );
   if (existsSync(web)) {
     await app.register(staticFiles, { root: web, prefix: "/" });
     app.setNotFoundHandler((req, reply) => {

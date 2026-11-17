@@ -8,6 +8,8 @@ if (
   throw new Error("公开监听需要 ACPAO_PUBLIC_URL=https://… 并配置 TLS 反向代理");
 const { app, tokenFile } = await createApp({
   logger: true,
+  projectRoot: process.env.ACPAO_EMBEDDED_WEB ? process.env.ACPAO_EMBEDDED_RUNTIME : undefined,
+  executable: !!process.env.ACPAO_EMBEDDED_WEB,
   demo: process.env.ACPAO_DEMO === "1",
   dataDir: process.env.ACPAO_DATA_DIR,
 });
