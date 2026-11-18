@@ -17,14 +17,18 @@
   --panel: #fff;
   --sidebar: #f2f4f6;
   --text: #252b32;
-  --muted: #818892;
-  --line: #e7e9ec;
+  --muted: #526070;
+  --line: #d6dce3;
   --hover: #e9edf0;
   --accent: #257b63;
   --accent-bg: #e8f2ed;
   --shadow: 0 16px 60px #1c253316;
   --code: #f3f5f7;
-  --danger: #bd534b;
+  --danger: #8d3a40;
+  --caution: #74520b;
+  --shell-command: #634400;
+  --shell-parameter: #075698;
+  --shell-string: #146344;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -32,14 +36,18 @@
   --panel: #1a1f24;
   --sidebar: #101418;
   --text: #dce2e8;
-  --muted: #828d96;
-  --line: #2a3036;
+  --muted: #acb8c5;
+  --line: #3a4652;
   --hover: #252d34;
   --accent: #7bc4a6;
   --accent-bg: #21372f;
   --shadow: 0 16px 60px #0005;
   --code: #11161b;
-  --danger: #eb9b91;
+  --danger: #ecb2af;
+  --caution: #f2cb83;
+  --shell-command: #f4d791;
+  --shell-parameter: #91d5ff;
+  --shell-string: #a9e3c2;
   color: var(--text);
   background: var(--bg);
 }
@@ -109,7 +117,7 @@ svg {
   flex-shrink: 0;
 }
 kbd {
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
 }
 ::selection {
@@ -146,7 +154,7 @@ kbd {
   gap: 8px;
 }
 .brand small {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 550;
   letter-spacing: 1px;
   color: var(--muted);
@@ -220,7 +228,7 @@ kbd {
   height: 35px;
   width: 100%;
   padding: 0 10px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   margin-bottom: 23px;
   box-shadow: 0 1px 2px #00000003;
@@ -237,7 +245,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 11px;
-  font-size: 13px;
+  font-size: 15px;
   height: 40px;
   padding: 0 12px;
   border-radius: 7px;
@@ -257,7 +265,7 @@ kbd {
   color: var(--accent);
 }
 .nav-count {
-  font-size: 10px;
+  font-size: 12px;
   margin-left: auto;
   background: var(--accent-bg);
   padding: 1px 6px;
@@ -270,7 +278,7 @@ kbd {
   overflow: auto;
 }
 .sidebar-label {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.6px;
   color: var(--muted);
   display: flex;
@@ -286,7 +294,7 @@ kbd {
   display: flex;
   gap: 10px;
   align-items: center;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   height: 35px;
   padding: 0 12px;
@@ -315,7 +323,7 @@ kbd {
   color: var(--text);
 }
 .sidebar-empty {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   padding: 10px 12px;
 }
@@ -327,7 +335,7 @@ kbd {
   display: flex;
   gap: 7px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   margin-bottom: 18px;
 }
 .sidebar-controls {
@@ -378,7 +386,7 @@ kbd {
   display: flex;
   gap: 12px;
   align-items: center;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
 }
 .breadcrumb strong {
@@ -386,7 +394,7 @@ kbd {
   font-weight: 500;
 }
 .connection {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   display: flex;
   gap: 7px;
@@ -423,7 +431,7 @@ kbd {
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--panel);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 550;
   white-space: nowrap;
   transition:
@@ -447,7 +455,7 @@ kbd {
 }
 .subtle-button,
 .text-button {
-  font-size: 11px;
+  font-size: 13px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -461,7 +469,7 @@ kbd {
   background: var(--hover);
 }
 .eyebrow {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.7px;
   color: var(--accent);
   font-weight: 650;
@@ -483,7 +491,7 @@ kbd {
   color: var(--muted);
 }
 .lead {
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.9;
   color: var(--muted);
   margin-top: 16px;
@@ -503,7 +511,7 @@ kbd {
   margin-bottom: 18px;
 }
 .step-title > span:first-child {
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -511,12 +519,12 @@ kbd {
   color: var(--muted);
 }
 .step-title h2 {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 .step-meta {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .host-choices {
@@ -549,11 +557,11 @@ kbd {
   color: var(--accent);
 }
 .host-choices strong {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 550;
 }
 .host-choices button > span {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .host-choices button > svg:last-child {
@@ -577,19 +585,19 @@ kbd {
   color: var(--muted);
 }
 .agent-empty strong {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text);
   font-weight: 500;
 }
 .agent-empty p {
-  font-size: 11px;
+  font-size: 13px;
   margin-top: 5px;
 }
 .agent-empty > .button {
   margin-left: auto;
 }
 .onboarding-foot {
-  font-size: 10px;
+  font-size: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -600,7 +608,7 @@ kbd {
 label {
   display: flex;
   flex-direction: column;
-  font-size: 12px;
+  font-size: 14px;
   gap: 9px;
   margin-bottom: 19px;
   font-weight: 500;
@@ -614,7 +622,7 @@ select {
   border-radius: 6px;
   padding: 10px 11px;
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   min-width: 0;
 }
 input::placeholder,
@@ -628,20 +636,20 @@ select {
   margin-top: 18px;
   flex-direction: row;
   align-items: center;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   flex-wrap: wrap;
 }
 .directory-label input {
   width: 100%;
   font-family: monospace;
-  font-size: 11px;
+  font-size: 13px;
 }
 .start-button {
   width: 100%;
 }
 .hint {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   line-height: 1.8;
 }
@@ -665,7 +673,7 @@ select {
   margin: 12px 0;
 }
 .page-title p {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.8;
   color: var(--muted);
 }
@@ -685,7 +693,7 @@ select {
 }
 .list-toolbar span {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 12px;
 }
 .session-row {
   display: flex;
@@ -715,7 +723,7 @@ select {
   flex: 1;
 }
 .session-row strong {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 550;
   display: block;
   overflow: hidden;
@@ -726,7 +734,7 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 8px;
 }
@@ -734,14 +742,14 @@ select {
   font-style: normal;
 }
 .session-row em {
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0 4px;
 }
 .session-row time {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   min-width: 67px;
   text-align: right;
@@ -755,7 +763,7 @@ select {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .status i {
@@ -787,7 +795,7 @@ select {
   font-weight: 500;
 }
 .empty-state p {
-  font-size: 12px;
+  font-size: 14px;
 }
 .hosts-list {
   display: grid;
@@ -824,7 +832,7 @@ select {
   gap: 10px;
 }
 .host-card h2 span {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--muted);
   font-weight: 400;
   border: 1px solid var(--line);
@@ -832,7 +840,7 @@ select {
   border-radius: 4px;
 }
 .host-card-head p {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   display: flex;
   gap: 8px;
@@ -858,7 +866,7 @@ select {
   display: flex;
   gap: 9px;
   align-items: center;
-  font-size: 11px;
+  font-size: 13px;
   padding: 10px 0;
   color: var(--muted);
 }
@@ -867,13 +875,13 @@ select {
 }
 .host-agents > div > span:last-child {
   margin-left: auto;
-  font-size: 9px;
+  font-size: 11px;
   border: 1px solid var(--line);
   padding: 1px 4px;
   border-radius: 3px;
 }
 .host-agents > p {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   padding: 8px 0;
 }
@@ -887,11 +895,18 @@ select {
   border-radius: 0 0 10px 10px;
   gap: 15px;
 }
+.host-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 7px;
+}
 .host-card footer > span {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   overflow: hidden;
   white-space: nowrap;
@@ -906,13 +921,13 @@ select {
   color: var(--muted);
 }
 .host-explainer h3 {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text);
   font-weight: 500;
   margin-bottom: 8px;
 }
 .host-explainer p {
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.9;
   max-width: 600px;
 }
@@ -938,7 +953,7 @@ select {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 11px;
 }
@@ -981,7 +996,7 @@ select {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 12px;
   flex-shrink: 0;
   color: var(--muted);
 }
@@ -994,7 +1009,7 @@ select {
   flex: 1;
 }
 .message-author {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -1003,13 +1018,12 @@ select {
   margin-bottom: 9px;
 }
 .message-author time {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--muted);
   font-weight: 400;
-  opacity: 0.7;
 }
 .markdown {
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.95;
   overflow-wrap: anywhere;
 }
@@ -1043,7 +1057,7 @@ select {
   background: var(--code);
   padding: 2px 5px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 13px;
 }
 .markdown pre {
   background: var(--code);
@@ -1079,7 +1093,7 @@ select {
 .markdown table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 11px;
+  font-size: 13px;
 }
 .markdown th,
 .markdown td {
@@ -1098,7 +1112,7 @@ select {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 8px 12px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
 }
 .tool-message summary {
@@ -1112,7 +1126,7 @@ select {
   margin-left: auto;
 }
 .tool-message pre {
-  font-size: 10px;
+  font-size: 12px;
   margin: 10px 0 0;
   white-space: pre-wrap;
 }
@@ -1136,7 +1150,7 @@ select {
   font-weight: 500;
 }
 .chat-intro p {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   margin-top: 15px;
 }
@@ -1145,7 +1159,7 @@ select {
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   margin-top: 24px;
 }
 .intro-details span {
@@ -1156,7 +1170,7 @@ select {
 }
 .thinking {
   margin-left: 44px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   display: flex;
   align-items: center;
@@ -1198,7 +1212,7 @@ select {
   border: 0;
   background: none;
   padding: 0 2px;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.8;
   max-height: 180px;
   outline: none;
@@ -1213,12 +1227,12 @@ select {
   margin-top: 10px;
 }
 .queued-steering { display: grid; gap: 6px; padding: 0 4px 10px; }
-.queued-steering > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); }
+.queued-steering > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--muted); }
 .queued-steering span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queued-steering button, .steer-button { border: 0; background: transparent; color: var(--accent); cursor: pointer; white-space: nowrap; font: inherit; }
 .queued-steering button:hover, .steer-button:hover { text-decoration: underline; }
 .composer-bottom > span {
-  font-size: 10px;
+  font-size: 12px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1252,13 +1266,13 @@ select {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .composer-hint {
   display: flex;
   justify-content: space-between;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--muted);
   padding: 10px 3px 0;
   gap: 12px;
@@ -1270,11 +1284,11 @@ select {
   flex: 1;
   gap: 10px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .history-button {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin: 0 auto 20px;
 }
@@ -1292,7 +1306,7 @@ select {
   border-radius: 7px;
   background: var(--panel);
   padding: 9px 11px;
-  font-size: 10px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 .delegation-strip a > span:not(.status) {
@@ -1317,11 +1331,11 @@ select {
   align-items: center;
 }
 .approval-card strong {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 .approval-card p {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   margin-top: 5px;
 }
@@ -1342,7 +1356,7 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   background: var(--sidebar);
   border-bottom: 1px solid var(--line);
@@ -1367,7 +1381,7 @@ select {
   background: var(--panel);
   box-shadow: var(--shadow);
   padding: 12px 17px;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
 }
 .notification > svg {
@@ -1410,7 +1424,7 @@ dialog::backdrop {
   letter-spacing: -0.3px;
 }
 .modal-description {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   line-height: 1.9;
   margin-bottom: 24px;
@@ -1428,7 +1442,7 @@ dialog::backdrop {
   margin-top: 25px;
 }
 .advanced {
-  font-size: 11px;
+  font-size: 13px;
   margin-top: 20px;
 }
 .advanced summary {
@@ -1441,7 +1455,7 @@ dialog::backdrop {
   list-style: none;
 }
 .advanced label {
-  font-size: 11px;
+  font-size: 13px;
 }
 .advanced input,
 .advanced textarea {
@@ -1461,7 +1475,7 @@ dialog::backdrop {
   border-color: var(--accent);
 }
 .command-editor .cm-editor {
-  font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+  font: 14px/1.6 Consolas, ui-monospace, SFMono-Regular, monospace;
   color: var(--text);
   background: transparent;
 }
@@ -1489,7 +1503,7 @@ dialog::backdrop {
   border-radius: 7px;
   background: var(--code);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 .command-edit-bubble button {
   color: var(--accent);
@@ -1503,15 +1517,23 @@ dialog::backdrop {
   padding: 12px;
   border-radius: 7px;
   background: var(--code);
-  color: var(--danger);
-  font-size: 11px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+.agent-probe-error strong {
+  color: var(--caution);
+}
+.agent-probe-error pre {
+  white-space: inherit;
+  margin-bottom: 0;
 }
 .checkbox {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
+  font-size: 13px;
   margin: 7px 0;
   color: var(--muted);
 }
@@ -1521,17 +1543,17 @@ dialog::backdrop {
   accent-color: var(--accent);
 }
 .checkbox > span {
-  font-size: 9px;
+  font-size: 11px;
   margin-left: auto;
 }
 .pair-result > p {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.9;
   margin-bottom: 18px;
 }
 .pair-result pre,
 .diagnostics {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.9;
   background: var(--code);
   padding: 16px;
@@ -1551,12 +1573,12 @@ dialog::backdrop {
   border-bottom: 1px solid var(--line);
 }
 .diagnostic-settings strong {
-  font-size: 12px;
+  font-size: 14px;
 }
 .diagnostic-settings p {
   margin: 5px 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 .diagnostic-settings input {
   accent-color: var(--accent);
@@ -1584,13 +1606,16 @@ dialog::backdrop {
   gap: 8px;
   align-items: center;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 13px;
 }
 .diagnostic-entry summary span,
 .diagnostic-entry summary small,
 .diagnostic-entry p {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
+}
+.diagnostic-entry.warning summary strong {
+  color: var(--caution);
 }
 .diagnostic-entry.error summary strong {
   color: var(--danger);
@@ -1600,7 +1625,7 @@ dialog::backdrop {
   overflow-wrap: anywhere;
   padding: 8px;
   background: var(--code);
-  font-size: 11px;
+  font-size: 13px;
 }
 .diagnostic-entry p {
   margin: 0 0 4px;
@@ -1611,7 +1636,7 @@ dialog::backdrop {
 }
 .pair-result > .hint {
   margin-top: 20px;
-  font-size: 11px;
+  font-size: 13px;
 }
 .detected {
   margin-bottom: 24px;
@@ -1619,7 +1644,7 @@ dialog::backdrop {
   border-bottom: 1px solid var(--line);
 }
 .detected p {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   margin-bottom: 10px;
 }
@@ -1650,7 +1675,7 @@ dialog::backdrop {
   padding: 13px 7px;
   text-align: left;
   border-top: 1px solid var(--line);
-  font-size: 12px;
+  font-size: 14px;
 }
 .palette-results button > span:first-of-type {
   flex: 1;
@@ -1698,7 +1723,7 @@ summary::-webkit-details-marker {
   width: 100%;
   padding: 9px;
   border-radius: 5px;
-  font-size: 11px;
+  font-size: 13px;
   text-align: left;
 }
 .more-menu > div button:hover,
@@ -1722,7 +1747,7 @@ summary::-webkit-details-marker {
   padding: 17px;
 }
 .host-options p {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   line-height: 1.8;
   margin-bottom: 12px;
@@ -1757,7 +1782,7 @@ summary::-webkit-details-marker {
   gap: 10px;
 }
 .login-brand > span:last-child > span {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 2px;
   color: var(--muted);
 }
@@ -1777,7 +1802,7 @@ summary::-webkit-details-marker {
   margin-top: 16px;
 }
 .login-card > p:not(.hint) {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.9;
   color: var(--muted);
   margin: 17px 0 29px;
@@ -1789,16 +1814,16 @@ summary::-webkit-details-marker {
 .login-hint {
   margin-top: 24px;
   text-align: center;
-  font-size: 10px;
+  font-size: 12px;
 }
 .login-foot {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 28px;
   letter-spacing: 1px;
 }
 .inline-error {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--danger);
   margin-bottom: 15px;
 }
@@ -1809,7 +1834,7 @@ summary::-webkit-details-marker {
   align-items: center;
   justify-content: center;
   gap: 18px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
 }
 .sr-only {
@@ -1941,11 +1966,11 @@ summary::-webkit-details-marker {
     padding: 0 20px;
   }
   .breadcrumb {
-    font-size: 10px;
+    font-size: 12px;
     gap: 8px;
   }
   .connection {
-    font-size: 9px;
+    font-size: 11px;
   }
   .onboarding {
     padding: 30px 23px;
@@ -1965,10 +1990,10 @@ summary::-webkit-details-marker {
     padding: 13px;
   }
   .host-choices strong {
-    font-size: 11px;
+    font-size: 13px;
   }
   .host-choices button > span {
-    font-size: 9px;
+    font-size: 11px;
   }
   .agent-empty {
     gap: 8px;
@@ -2002,14 +2027,14 @@ summary::-webkit-details-marker {
     padding: 18px 0;
   }
   .session-row .status {
-    font-size: 9px;
+    font-size: 11px;
   }
   .session-row time,
   .session-row > svg {
     display: none;
   }
   .session-row strong {
-    font-size: 12px;
+    font-size: 14px;
   }
   .session-row-icon {
     width: 32px;
@@ -2017,10 +2042,10 @@ summary::-webkit-details-marker {
   }
   .list-toolbar input {
     width: 150px;
-    font-size: 11px;
+    font-size: 13px;
   }
   .list-toolbar span {
-    font-size: 9px;
+    font-size: 11px;
   }
   .chat-heading {
     padding: 22px 20px 14px;
@@ -2034,7 +2059,7 @@ summary::-webkit-details-marker {
     display: none;
   }
   .chat-meta {
-    font-size: 9px;
+    font-size: 11px;
     gap: 6px;
     flex-wrap: wrap;
   }
@@ -2054,11 +2079,11 @@ summary::-webkit-details-marker {
     height: 24px;
   }
   .markdown {
-    font-size: 12px;
+    font-size: 14px;
     line-height: 1.9;
   }
   .message-author {
-    font-size: 10px;
+    font-size: 12px;
   }
   .composer-area {
     padding: 0 15px 14px;
@@ -2070,7 +2095,7 @@ summary::-webkit-details-marker {
     display: none;
   }
   .composer textarea {
-    font-size: 12px;
+    font-size: 14px;
   }
   .chat-intro {
     min-height: 230px;
@@ -2079,7 +2104,7 @@ summary::-webkit-details-marker {
     font-size: 21px;
   }
   .chat-intro p {
-    font-size: 11px;
+    font-size: 13px;
     max-width: 240px;
     line-height: 1.8;
   }
@@ -2103,14 +2128,14 @@ summary::-webkit-details-marker {
     flex-wrap: wrap;
   }
   .host-card h2 {
-    font-size: 13px;
+    font-size: 15px;
   }
   .host-explainer {
     margin: 25px 0;
     gap: 10px;
   }
   .host-explainer p {
-    font-size: 10px;
+    font-size: 12px;
   }
   .tool-message {
     margin-left: 34px;
@@ -2120,7 +2145,7 @@ summary::-webkit-details-marker {
   }
   .session-notice {
     padding: 10px 16px;
-    font-size: 10px;
+    font-size: 12px;
   }
   .login-card {
     padding: 27px;
@@ -2135,11 +2160,11 @@ summary::-webkit-details-marker {
     grid-template-columns: 1fr;
   }
   .chat-page .approval-card .button {
-    font-size: 10px;
+    font-size: 12px;
     padding: 0 10px;
   }
   .notification {
-    font-size: 11px;
+    font-size: 13px;
     bottom: 16px;
   }
   .empty-state h2 {
@@ -2159,7 +2184,7 @@ summary::-webkit-details-marker {
   }
 }
 .approval-details {
-  font-size: 10px;
+  font-size: 12px;
   margin: 14px 0 0;
   color: var(--muted);
 }
@@ -2176,7 +2201,7 @@ summary::-webkit-details-marker {
   overflow-wrap: anywhere;
 }
 .host-error {
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.8;
   color: var(--danger);
   margin: 0 23px 16px;

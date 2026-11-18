@@ -74,6 +74,7 @@ export default function App() {
     [theme, setTheme] = useState(localStorage.getItem("acpao-theme") ?? "system"),
     [fixture, setFixture] = useState<Agent>(),
     [editingAgent, setEditingAgent] = useState<Agent | null>(null),
+    [agentHostId, setAgentHostId] = useState("local"),
     [detected, setDetected] = useState<Agent[]>([]),
     [working, setWorking] = useState(false),
     [text, setText] = useState(""),
@@ -116,6 +117,7 @@ export default function App() {
   const moreMenu = useRef<HTMLDetailsElement>(null);
   activeRef.current = sessionId;
   const host = hosts.find((h) => h.id === hostId);
+  const agentHost = hosts.find((h) => h.id === agentHostId);
   const currentSession = sessions.find((s) => s.id === sessionId);
   const isWorkspace = route === "/workspace";
   const pairCenterOrigin = (() => {
@@ -288,24 +290,33 @@ export default function App() {
       report(e);
     }
   };
+  const openAgent = (target: string) => {
+    setAgentHostId(target);
+    setEditingAgent(null);
+    setDetected([]);
+    if (target === "local") void detect();
+    setModal("agent");
+  };
   const addAgent = async (a: Agent) => {
     const result = await api<{
       ok: boolean;
       updated?: boolean;
       probe: { stage: string; message: string; stderr?: string };
-    }>("/hosts/local/agent", { agent: a });
+    }>(`/hosts/${encodeURIComponent(agentHostId)}/agent`, { agent: a });
     if (!result.ok)
       throw new Error(
         `${result.probe.message}${result.probe.stderr ? `\n${result.probe.stderr}` : ""}`,
       );
     await refresh();
-    setAgentId(a.id);
+    if (agentHostId === hostId) setAgentId(a.id);
     setModal(null);
     setEditingAgent(null);
     setToast(result.updated ? "Agent 已测试并更新" : "Agent 已测试并添加");
   };
-  const editAgent = async (key: string) => {
-    const agent = await api<Agent>(`/hosts/local/agents/${encodeURIComponent(key)}`);
+  const editAgent = async (target: string, key: string) => {
+    const agent = await api<Agent>(`/hosts/${encodeURIComponent(target)}/agents/${encodeURIComponent(key)}`);
+    setAgentHostId(target);
+    setDetected([]);
     setEditingAgent(agent);
     setModal("agent");
   };
@@ -715,14 +726,11 @@ export default function App() {
                   <button
                     className="button"
                     onClick={() => {
-                      if (host?.kind === "remote") {
-                        setToast("请在远程 Gateway 配置文件中添加 Agent 后重启");
+                      if (host?.kind === "remote" && (!host.manageAgents || host.status !== "online")) {
                         navigate("/hosts");
-                      } else {
-                        setEditingAgent(null);
-                        void detect();
-                        setModal("agent");
+                        return;
                       }
+                      openAgent(host?.id ?? "local");
                     }}
                   >
                     配置 Agent
@@ -1080,11 +1088,11 @@ export default function App() {
                         <Terminal size={15} />
                         <span>{a.name}</span>
                         <span>ACP</span>
-                        {h.kind === "local" && (
+                        {(h.kind === "local" || (h.manageAgents && h.status === "online")) && (
                           <button
                             className="icon-button"
                             aria-label={`编辑 ${a.name}`}
-                            onClick={() => void editAgent(a.id).catch(report)}
+                            onClick={() => void editAgent(h.id, a.id).catch(report)}
                           >
                             <Pencil size={14} />
                           </button>
@@ -1092,26 +1100,22 @@ export default function App() {
                       </div>
                     ))}
                     {h.agents.length === 0 && <p>尚未配置 ACP Agent</p>}
+                    {h.kind === "remote" && h.status === "online" && !h.manageAgents &&
+                      <p>升级远程 Gateway 后即可在此添加 Agent。</p>}
                   </div>
                   <footer>
                     <span>
                       <Folder size={13} />
                       {h.cwd || "工作目录将在连接后同步"}
                     </span>
-                    {h.kind === "local" ? (
-                      <button
-                        className="subtle-button"
-                        onClick={() => {
-                          setEditingAgent(null);
-                          void detect();
-                          setModal("agent");
-                        }}
-                      >
-                        <Plus size={14} />
-                        添加 Agent
-                      </button>
-                    ) : (
-                      h.status !== "revoked" && (
+                    <div className="host-actions">
+                      {h.status !== "revoked" && (
+                        <button className="subtle-button" onClick={() => openAgent(h.id)}
+                          disabled={h.kind === "remote" && (h.status !== "online" || !h.manageAgents)}>
+                          <Plus size={14} /> 添加 Agent
+                        </button>
+                      )}
+                      {h.kind === "remote" && h.status !== "revoked" && (
                         <details className="host-options">
                           <summary className="subtle-button">
                             身份管理
@@ -1147,8 +1151,8 @@ export default function App() {
                             </button>
                           </div>
                         </details>
-                      )
-                    )}
+                      )}
+                    </div>
                   </footer>
                 </article>
               ))}
@@ -1269,7 +1273,10 @@ export default function App() {
           backdropClose={false}
           onClose={() => setModal(null)}
         >
-          {detected.length > 0 && (
+          {agentHost?.kind === "remote" && (
+            <p className="modal-description">目标主机：<strong>{agentHost.name}</strong>。启动命令将在这台主机上测试和运行。</p>
+          )}
+          {agentHostId === "local" && !editingAgent && detected.length > 0 && (
             <div className="detected">
               <p>检测到以下启动程序（尚未验证登录状态）</p>
               {detected.map((a) => (
@@ -1286,18 +1293,18 @@ export default function App() {
             </div>
           )}
           <AgentForm
-            key={editingAgent?.id ?? "new"}
+            key={agentHostId + ":" + (editingAgent?.id ?? "new")}
             initial={editingAgent ?? undefined}
-            windows={hosts.find((h) => h.id === "local")?.platform === "win32"}
+            windows={["win32", "windows"].includes(agentHost?.platform ?? "")}
             onSave={addAgent}
             fixture={
-              editingAgent ||
+              agentHostId !== "local" || editingAgent ||
               hosts.find((h) => h.id === "local")?.agents.some((a) => a.id === "mock")
                 ? undefined
                 : fixture
             }
           />
-          {config.testFeatures && (
+          {agentHostId === "local" && config.testFeatures && (
             <p className="hint">测试 Agent 仅用于验证协议、流式输出和委派，不具备模型推理能力。</p>
           )}
         </Modal>

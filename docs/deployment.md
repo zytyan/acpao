@@ -54,7 +54,7 @@ Dockerfile 提供可选 Node 镜像入口，默认普通 `node` 用户。镜像�
 
 SSH 服务端需要允许反向 TCP 转发，使用 `GatewayPorts no` 或 `clientspecified`。中心只转发 Gateway 用到的接口，并自动生成和固定隧道内部的 TLS 证书。中心可以维持默认的本机 HTTP 地址，无需公网 HTTPS 或证书。中心重启会从 SQLite 重新建立隧道。已完全离线的 Gateway 继续执行本地工作，连接恢复后补发事件。
 
-部署文件位于远程 SSH 用户家目录下的 `.acpao/gateways/<主机 ID>/`，工作根目录默认是该用户的家目录。平台会尝试发现该账户 PATH 内的 `codex-acp` 和 `opencode`。其他 Agent 可编辑 `state/config.json` 后重启 Gateway。Agent 仍需在远程主机自行安装和登录。
+部署文件位于远程 SSH 用户家目录下的 `.acpao/gateways/<主机 ID>/`，工作根目录默认是该用户的家目录。平台会尝试发现该账户 PATH 内的 `codex-acp` 和 `opencode`。其他 Agent 先以运行 Gateway 的用户完成安装与登录，再从「主机 → 远程主机 → 添加 Agent」填写启动命令（例如 `opencode acp`）并测试。Gateway 在远端打开 ACP 会话验证后保存配置。旧版 Gateway 仍可编辑 `state/config.json` 后按原方式重启，升级后可使用界面。
 
 ### 手动添加
 

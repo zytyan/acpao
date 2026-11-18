@@ -13,6 +13,7 @@ export interface Host {
   agents: Agent[];
   cwd: string;
   platform?: string;
+  manageAgents?: boolean;
   error?: string;
 }
 export interface Session {

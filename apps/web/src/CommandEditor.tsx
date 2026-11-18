@@ -2,9 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { history, historyKeymap, isolateHistory, undo } from "@codemirror/commands";
-import { StreamLanguage, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
+import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { formatPastedWindowsPath } from "../../../packages/core/src/agent-command";
+
+const commandHighlight = HighlightStyle.define([
+  {
+    tag: [tags.keyword, tags.function(tags.variableName), tags.special(tags.variableName)],
+    color: "var(--shell-command)",
+  },
+  {
+    tag: [tags.variableName, tags.operator, tags.number, tags.bool],
+    color: "var(--shell-parameter)",
+  },
+  { tag: [tags.string, tags.special(tags.string)], color: "var(--shell-string)" },
+  { tag: tags.comment, color: "var(--muted)" },
+]);
 
 export function CommandEditor({
   initial,
@@ -39,7 +53,7 @@ export function CommandEditor({
             },
           ]),
           StreamLanguage.define(shell),
-          syntaxHighlighting(defaultHighlightStyle),
+          syntaxHighlighting(commandHighlight),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ "aria-label": "启动命令" }),
           EditorView.domEventHandlers({

@@ -315,7 +315,12 @@ export function AgentForm({
           默认继承主机环境；这里填写的变量会覆盖同名值。
         </p>
       </details>
-      {failure && <pre className="agent-probe-error" role="alert">{failure}</pre>}
+      {failure && (
+        <div className="agent-probe-error" role="alert">
+          <strong>连接测试未通过</strong>
+          <pre>{failure}</pre>
+        </div>
+      )}
       <div className="form-actions">
         {fixture && (
           <button
