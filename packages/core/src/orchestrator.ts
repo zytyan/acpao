@@ -53,7 +53,7 @@ export class Orchestrator {
   ) {}
   authorize(p: Principal, s: Session) {
     if (p.kind === "admin") return;
-    if (p.kind !== "agent" || p.host !== s.host)
+    if (p.kind !== "agent" || !p.session || this.store.get<Session>("session", p.session)?.host !== p.host)
       throw new AppError("FORBIDDEN", "无权访问此会话", 403);
     let next: Session | undefined = s;
     for (let i = 0; i < 16 && next; i++) {
@@ -62,13 +62,13 @@ export class Orchestrator {
     }
     throw new AppError("FORBIDDEN", "仅可管理当前会话和委派的会话", 403);
   }
-  private hostScope(p: Principal, host: string) {
-    if (p.kind === "device" || (p.kind === "agent" && p.host !== host))
+  private assertAgentOrigin(p: Principal) {
+    if (p.kind === "device" || (p.kind === "agent" && (!p.session || this.store.get<Session>("session", p.session)?.host !== p.host)))
       throw new AppError("HOST_FORBIDDEN", "凭据不允许操作此主机", 403);
   }
   async create(input: unknown, p: Principal, parent?: string, sessionId = id("s")) {
     const v = CreateSchema.parse(input);
-    this.hostScope(p, v.host);
+    this.assertAgentOrigin(p);
     const h = this.store.host(v.host);
     if (h.status !== "online") throw new AppError("HOST_OFFLINE", "主机未连接", 409);
     if (p.kind === "agent") {
@@ -116,11 +116,16 @@ export class Orchestrator {
   async send(input: unknown, p: Principal) {
     const v = SendSchema.parse(input),
       s = this.store.session(v.session);
-    this.authorize(p, s);
+    const source = p.kind === "agent" && p.session ? this.store.get<Session>("session", p.session) : undefined;
+    // A delegated Agent may report to its direct parent without reading or managing that session.
+    const reportingToParent = source && source.host === p.host && source.parent === s.id;
+    if (!reportingToParent || v.mode === "steer")
+      this.authorize(p, s);
     this.store.audit(p, "session.send", s.id);
+    const mode = reportingToParent && v.mode === "auto" ? "queue" : v.mode;
     return s.host === "local"
-      ? this.local.submit(s.id, v.text, v.mode, v.requestId)
-      : this.remote.call(s.host, "send", v, v.requestId);
+      ? this.local.submit(s.id, v.text, mode, v.requestId)
+      : this.remote.call(s.host, "send", { ...v, mode }, v.requestId);
   }
   async action(key: string, action: "cancel" | "close" | "resume", p: Principal) {
     const s = this.store.session(key);
@@ -161,6 +166,7 @@ export class Orchestrator {
       agent: s.agent,
       host: s.host,
       status: s.status,
+      ...(s.parent ? { parent: s.parent } : {}),
       ...(s.stopReason ? { stopReason: s.stopReason } : {}),
       ...(message ? { summary: message.body.slice(-1500) } : {}),
       ...(s.error ? { error: s.error } : {}),
@@ -180,8 +186,11 @@ export class Orchestrator {
         const v = ToolSchemas.hosts.parse(input);
         return this.store
           .all<import("./types.js").Host>("host")
-          .filter((h) => (!v.host || h.id === v.host) && (p.kind === "admin" || h.id === p.host))
-          .map(publicHost);
+          .filter((h) => (!v.host || h.id === v.host) && (p.kind === "admin" || h.status === "online"))
+          .map((host) => p.kind === "admin" ? publicHost(host) : {
+            id: host.id, name: host.name, status: host.status,
+            agents: host.agents.map(({ id, name }) => ({ id, name })),
+          });
       }
       case "send":
         return this.send(input, p);
@@ -189,7 +198,7 @@ export class Orchestrator {
         const v = ToolSchemas.delegate.parse(input),
           source = p.session ? this.store.session(p.session) : undefined,
           host = v.host ?? source?.host ?? "local";
-        this.hostScope(p, host);
+        this.assertAgentOrigin(p);
         const requestKey = v.requestId ? `${p.id}:${v.requestId}` : undefined;
         const prior = requestKey
           ? this.store.get<{ session: string; fingerprint: string }>("delegate", requestKey)
@@ -218,7 +227,7 @@ export class Orchestrator {
           {
             host,
             agent: v.agent,
-            cwd: v.cwd ?? source?.cwd ?? this.store.host(host).cwd,
+            cwd: v.cwd ?? (source?.host === host ? source.cwd : this.store.host(host).cwd),
             title: v.title ?? v.instruction.slice(0, 60),
             isolate: v.isolate,
           },
@@ -253,8 +262,8 @@ export class Orchestrator {
             .slice(0, 100)
             .map((s) => this.compact(s));
         if (v.action === "create") {
-          if (!v.cwd) throw new AppError("MISSING_DIRECTORY", "创建会话需要 cwd");
-          return this.compact(await this.create({ ...v, host: v.host ?? p.host ?? "local" }, p));
+          const host = v.host ?? p.host ?? "local";
+          return this.compact(await this.create({ ...v, host, cwd: v.cwd ?? this.store.host(host).cwd }, p));
         }
         if (!v.session) throw new AppError("MISSING_SESSION", "此操作需要 session");
         const s = this.store.session(v.session);

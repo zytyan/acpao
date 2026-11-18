@@ -227,6 +227,23 @@ test(
       () => c.store.messages(session.id).some((message) => message.role === "assistant" && message.body.includes("MCP 服务：acpao")),
       Boolean,
     );
+    const remoteAgentScope = { kind: "agent" as const, id: session.id, host: identity.host, session: session.id };
+    const discovered = await c.orchestration.tool("hosts", {}, remoteAgentScope) as { id: string }[];
+    assert.ok(discovered.some(host => host.id === "local"));
+    assert.ok(discovered.some(host => host.id === identity.host));
+    const delegated = await c.orchestration.tool("delegate", {
+      host: "local", agent: "mock", instruction: "Cross-host delegation",
+    }, remoteAgentScope) as { session: string };
+    assert.equal(c.store.session(delegated.session).host, "local");
+    assert.equal(c.store.session(delegated.session).parent, session.id);
+    await until(() => c.store.session(delegated.session).status, status => status === "completed");
+    const childScope = { kind: "agent" as const, id: delegated.session, host: "local", session: delegated.session };
+    await assert.rejects(c.orchestration.tool("sessions", { action: "get", session: session.id }, childScope), {
+      code: "FORBIDDEN",
+    });
+    await c.orchestration.tool("send", { session: session.id, text: "Cross-host reply" }, childScope);
+    await until(() => c.store.messages(session.id).some(message =>
+      message.role === "assistant" && message.body.includes("Cross-host reply")), Boolean);
     const finalChild = child;
     finalChild.kill();
     await new Promise<void>((done) => finalChild.once("exit", () => done()));
