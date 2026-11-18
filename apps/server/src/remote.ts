@@ -12,6 +12,7 @@ import {
   type Command,
 } from "../../../packages/core/src/types.js";
 import { readSlashCommands } from "../../../packages/core/src/slash-commands.js";
+import { ModelSchema } from "../../../packages/core/src/session-model.js";
 import type * as acp from "@agentclientprotocol/sdk";
 const Hello = z.object({
   type: z.literal("hello"),
@@ -19,6 +20,7 @@ const Hello = z.object({
   cwd: z.string().max(4096),
   platform: z.string().max(100),
   manageAgents: z.boolean().optional(),
+  browseDirectories: z.boolean().optional(),
   arch: z.string().max(30).optional(),
   version: z.string().max(100).optional(),
   managed: z.boolean().optional(),
@@ -101,6 +103,7 @@ export class RemoteHub {
             cwd: h.cwd,
             platform: h.platform,
             manageAgents: h.manageAgents,
+            browseDirectories: h.browseDirectories,
             gatewayArch: h.arch,
             gatewayVersion: h.version,
             gatewayManaged: h.managed,
@@ -136,7 +139,7 @@ export class RemoteHub {
           const key = z.string().parse(data.id),
             receipt = this.store.get<{ host: string }>("dispatch", key);
           const waiter = this.waiting.get(key);
-          if (!receipt && key.startsWith("agent_") && !waiter) return; // Late management reply.
+          if (!receipt && key.startsWith("agent_") && !waiter) return; // Late transient reply.
           if ((receipt?.host ?? waiter?.transientHost) !== host) throw new Error("foreign response");
           if (receipt) this.store.put("dispatch", key, {
             ...receipt,
@@ -197,6 +200,10 @@ export class RemoteHub {
         const update = e.data as Session;
         if (update.id !== s.id || update.host !== host) throw new Error("invalid session");
         this.store.put("session", s.id, { ...update, parent: s.parent });
+      }
+      if (e.kind === "session.model" && s) {
+        if (e.data === null) this.store.remove("session-model", s.id);
+        else this.store.put("session-model", s.id, ModelSchema.parse(e.data));
       }
       if (e.kind === "queued" && s) {
         const d = e.data as { command: string; text: string };
@@ -271,17 +278,25 @@ export class RemoteHub {
     });
   }
   manageAgent(host: string, action: "agent.get" | "agent.configure", payload: unknown) {
-    const ws = this.peers.get(host);
-    if (!ws || ws.readyState !== WebSocket.OPEN)
-      throw new AppError("HOST_OFFLINE", "Gateway 未连接，请重连后再配置 Agent。", 409);
     if (!this.store.host(host).manageAgents)
       throw new AppError("GATEWAY_UPDATE_REQUIRED", "此 Gateway 版本需要升级后才能在界面配置 Agent。", 409);
+    return this.transient(host, action, payload);
+  }
+  listDirectories(host: string, payload: unknown) {
+    if (!this.store.host(host).browseDirectories)
+      throw new AppError("GATEWAY_UPDATE_REQUIRED", "此 Gateway 版本需要升级后才能浏览目录。", 409);
+    return this.transient(host, "directory.list", payload);
+  }
+  private transient(host: string, action: string, payload: unknown) {
+    const ws = this.peers.get(host);
+    if (!ws || ws.readyState !== WebSocket.OPEN)
+      throw new AppError("HOST_OFFLINE", "Gateway 未连接，请重连后再试。", 409);
     const key = id("agent");
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiting.delete(key);
-        reject(new AppError("AGENT_CONFIGURATION_UNCONFIRMED", "网关尚未确认，请刷新主机后检查是否保存。", 504));
-      }, 30000);
+        reject(new AppError("GATEWAY_REQUEST_TIMEOUT", "尚未收到 Gateway 确认，请重连后检查。", 504));
+      }, action === "directory.list" ? 10000 : 30000);
       this.waiting.set(key, { resolve, reject, timer, transientHost: host });
       ws.send(JSON.stringify({ type: "command", id: key, action, payload }), (error) => {
         if (!error) return;

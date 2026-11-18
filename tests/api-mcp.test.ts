@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFile } from "node:fs/promises";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -161,7 +161,7 @@ test("HTTP auth, cookie login, origin checks and role boundaries", async (t) => 
     200,
   );
 });
-test("real MCP HTTP SDK lists all five tools and preserves tool errors", async (t) => {
+test("real MCP HTTP SDK lists tools, browses directories and delegates in the selected directory", async (t) => {
   const c = await setup(t),
     client = new Client({ name: "integration", version: "1" });
   t.after(() => client.close());
@@ -173,17 +173,25 @@ test("real MCP HTTP SDK lists all five tools and preserves tool errors", async (
   const list = await client.listTools();
   assert.deepEqual(list.tools.map((t) => t.name).sort(), [
     "delegate",
+    "directories",
     "hosts",
     "send",
     "sessions",
     "wait",
   ]);
+  const target = resolve(c.root, "work", "nested");
+  await mkdir(target, { recursive: true });
+  const browse = await client.callTool({ name: "directories", arguments: { cwd: resolve(c.root, "work") } });
+  assert.equal(browse.isError, undefined);
+  const dirs = JSON.parse((browse.content as { text: string }[])[0]!.text);
+  assert.deepEqual(dirs.entries, [{ name: "nested", path: target }]);
   const result = await client.callTool({
     name: "delegate",
-    arguments: { instruction: "MCP integration", cwd: c.root, agent: "mock" },
+    arguments: { instruction: "MCP integration", cwd: target, agent: "mock" },
   });
   assert.ok(!result.isError);
   const data = JSON.parse((result.content as { text: string }[])[0]!.text);
+  assert.equal(data.cwd, target);
   const wait = await client.callTool({
     name: "wait",
     arguments: {
@@ -201,6 +209,56 @@ test("real MCP HTTP SDK lists all five tools and preserves tool errors", async (
   });
   assert.equal(error.isError, true);
   assert.match((error.content as { text: string }[])[0]!.text, /STEERING_UNSUPPORTED/);
+});
+
+test("directory switch keeps existing history, updates workspace and validates directory boundaries", async (t) => {
+  const c = await setup(t);
+  const headers = { authorization: `Bearer ${adminToken}` };
+  const folder = resolve(c.root, "..literal", "nested");
+  await mkdir(folder, { recursive: true });
+  await writeFile(resolve(c.root, "file.txt"), "");
+  if (process.platform !== "win32") await symlink(resolve(c.root, ".."), resolve(c.root, "escape"));
+  const url = "/api/hosts/local/directories";
+  assert.equal((await c.app.inject({ url })).statusCode, 401);
+  const root = await c.app.inject({ url, headers });
+  assert.ok(root.json().entries.some((e: { name: string }) => e.name === "..literal"));
+  assert.ok(root.json().entries.every((e: { name: string }) => !["file.txt", "escape"].includes(e.name)));
+  const outside = await c.app.inject({ url, headers, query: { cwd: resolve(c.root, "..") } });
+  assert.equal(outside.json().error.code, "DIRECTORY_FORBIDDEN");
+  const old = await c.orchestration.create({ cwd: c.root, agent: "mock", main: true }, owner);
+  await c.orchestration.send({ session: old.id, text: "history stays" }, owner);
+  await until(() => c.store.session(old.id).status, (status) => status === "completed");
+  const moved = await c.app.inject({
+    url: `/api/sessions/${old.id}/directory`, method: "POST", headers, payload: { cwd: folder },
+  });
+  assert.equal(moved.statusCode, 200, moved.body);
+  assert.equal(moved.json().cwd, folder);
+  assert.equal(c.store.get("setting", "main"), moved.json().id);
+  assert.notEqual(moved.json().id, old.id);
+  assert.ok(c.store.messages(old.id).some((message) => message.body.includes("history stays")));
+});
+
+test("model switching uses ACP advertised choices and waits for an idle session", async (t) => {
+  const c = await setup(t);
+  const original = await c.orchestration.create({ cwd: c.root, agent: "mock" }, owner);
+  const headers = { authorization: `Bearer ${adminToken}` };
+  const detail = `/api/sessions/${original.id}`;
+  const get = () => c.app.inject({ url: detail, headers });
+  const set = (value: string) => c.app.inject({ url: detail + "/model", method: "POST", headers, payload: { value } });
+  assert.equal((await get()).json().model.current, "mock-fast");
+  assert.equal((await set("hallucinated")).json().error.code, "MODEL_NOT_FOUND");
+  await c.orchestration.send({ session: original.id, text: "/sleep 500" }, owner);
+  assert.equal((await set("mock-deep")).json().error.code, "SESSION_BUSY");
+  await until(() => c.store.session(original.id).status, (status) => status === "completed");
+  const change = c.orchestration.setModel(original.id, "mock-deep", owner);
+  const queued = await c.orchestration.send({ session: original.id, text: "/current-model" }, owner) as { delivery: string };
+  assert.equal(queued.delivery, "queued");
+  await change;
+  await until(() => c.store.session(original.id).status, (status) => status === "completed");
+  const active = (await get()).json();
+  assert.equal(active.model.current, "mock-deep");
+  assert.equal(active.session.acpId, original.acpId);
+  assert.equal(active.messages.at(-1).body, "mock-deep");
 });
 test("parent ACP Agent delegates through a real stdio MCP bridge and reports output", async (t) => {
   const c = await setup(t),

@@ -1,4 +1,5 @@
 import type { SlashCommand } from "../../../packages/core/src/slash-commands";
+import type { SessionModel } from "../../../packages/core/src/session-model";
 
 export interface Agent {
   id: string;
@@ -59,6 +60,7 @@ export interface ChatData {
     agent: string;
   }[];
   slashCommands?: SlashCommand[];
+  model?: SessionModel | null;
   queued?: number;
   queuedCommands?: { id: string; text: string }[];
 }

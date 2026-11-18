@@ -1,11 +1,12 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { Readable, Writable } from "node:stream";
-import { realpath, stat } from "node:fs/promises";
-import { resolve, relative, isAbsolute } from "node:path";
+import { realpath, stat, readdir } from "node:fs/promises";
+import { resolve, relative, isAbsolute, sep } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readSlashCommands } from "./slash-commands.js";
+import { readModel, type SessionModel } from "./session-model.js";
 import { Store, id } from "./store.js";
 import { prepareAgentSpawn } from "./agent-spawn.js";
 import { agentEnvironment } from "./agent-command.js";
@@ -23,6 +24,8 @@ interface Slot {
   ready: boolean;
   stopping: boolean;
   cancelled: boolean;
+  settingModel?: boolean;
+  modelRevision?: number;
 }
 export interface RuntimeOptions {
   host: string;
@@ -126,7 +129,7 @@ export class Runtime {
         throw new AppError("DIRECTORY_NOT_FOUND", "工作目录不存在");
       });
     const rel = relative(root, target);
-    if (rel.startsWith("..") || isAbsolute(rel))
+    if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel))
       throw new AppError("DIRECTORY_FORBIDDEN", "目录超出主机允许的工作根目录", 403);
     if (!(await stat(target)).isDirectory())
       throw new AppError("INVALID_DIRECTORY", "工作目录不是文件夹");
@@ -138,6 +141,19 @@ export class Runtime {
       { timeout: 30000 },
     );
     return worktree;
+  }
+  async directories(cwd: string | undefined, offset: number) {
+    const path = await this.directory(cwd ?? this.options.root);
+    const entries = await readdir(path, { withFileTypes: true }).catch(() => {
+      throw new AppError("DIRECTORY_UNREADABLE", "无法读取此目录", 403);
+    });
+    const children = entries.filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+      .map((entry) => entry.name).sort();
+    return {
+      path,
+      entries: children.slice(offset, offset + 100).map((name) => ({ name, path: resolve(path, name) })),
+      next: offset + 100 < children.length ? offset + 100 : null,
+    };
   }
   async create(s: Session, config: AgentConfig, isolate = false) {
     const cwd = await this.directory(s.cwd, isolate);
@@ -165,6 +181,7 @@ export class Runtime {
       );
     const s = this.store.session(key);
     this.store.remove("session-commands", key);
+    this.store.remove("session-model", key);
     this.store.updateSession(key, { status: "creating", error: undefined });
     this.store.diagnostic({
       level: "info",
@@ -310,7 +327,7 @@ export class Runtime {
       if (restore) {
         if (!init.agentCapabilities?.loadSession)
           throw new AppError("RESTORE_UNSUPPORTED", "Agent 当前不支持历史恢复");
-        await connection.agent.request(
+        const result = await connection.agent.request(
           acp.methods.agent.session.load,
           { sessionId: s.acpId!, cwd: s.cwd, mcpServers },
           {
@@ -318,6 +335,7 @@ export class Runtime {
             stopWaitingOnCancel: true,
           },
         );
+        if (!slot.modelRevision) this.saveModel(key, result.configOptions);
       } else {
         const result = await connection.agent.request(
           acp.methods.agent.session.new,
@@ -328,6 +346,7 @@ export class Runtime {
           },
         );
         this.store.updateSession(key, { acpId: result.sessionId });
+        if (!slot.modelRevision) this.saveModel(key, result.configOptions);
       }
       if (slot.stopping) throw new AppError("AGENT_EXITED", "Agent 初始化时退出");
       this.options.onStage?.(key, "session");
@@ -362,11 +381,55 @@ export class Runtime {
       throw e;
     }
   }
+  private saveModel(key: string, options: unknown) {
+    const model = readModel(options);
+    if (model) this.store.put("session-model", key, model);
+    else this.store.remove("session-model", key);
+    this.store.event(key, "session.model", model ?? null);
+    return model;
+  }
+  async setModel(key: string, value: string) {
+    const slot = this.slots.get(key);
+    const s = this.store.session(key);
+    if (!slot?.ready || slot.stopping)
+      throw new AppError("SESSION_UNAVAILABLE", "会话当前未连接", 409);
+    if (slot.active || slot.settingModel || this.store.commands(key, "queued").length)
+      throw new AppError("SESSION_BUSY", "请等待当前执行和排队消息完成后再切换模型", 409);
+    const model = this.store.get<SessionModel>("session-model", key);
+    if (!model) throw new AppError("MODEL_UNSUPPORTED", "此 Agent 未提供模型选择", 409);
+    if (!model.choices.some((choice) => choice.value === value))
+      throw new AppError("MODEL_NOT_FOUND", "此模型不在 Agent 提供的列表中");
+    if (model.current === value) return model;
+    slot.settingModel = true;
+    try {
+      const revision = slot.modelRevision;
+      const result = await slot.connection.agent.request(acp.methods.agent.session.setConfigOption,
+        { sessionId: s.acpId!, configId: model.id, value },
+        { cancellationSignal: AbortSignal.timeout(15000), stopWaitingOnCancel: true });
+      if (slot.stopping) throw new AppError("SESSION_UNAVAILABLE", "会话已断开", 409);
+      const current = slot.modelRevision === revision
+        ? this.saveModel(key, result.configOptions)
+        : this.store.get<SessionModel>("session-model", key);
+      if (current?.current !== value)
+        throw new AppError("MODEL_SWITCH_FAILED", "Agent 未确认所选模型", 409);
+      return current;
+    } catch (e) {
+      if (e instanceof AppError) throw e;
+      throw new AppError("MODEL_SWITCH_FAILED", "Agent 未确认模型切换，请查看当前模型后重试", 409);
+    } finally {
+      slot.settingModel = false;
+      this.pump();
+    }
+  }
   private update(key: string, update: acp.SessionUpdate) {
     const slot = this.slots.get(key);
     if (slot?.stopping) return;
     const run = slot?.active ?? "history";
     this.store.transaction(() => {
+      if (update.sessionUpdate === "config_option_update" && slot) {
+        slot.modelRevision = (slot.modelRevision ?? 0) + 1;
+        this.saveModel(key, update.configOptions);
+      }
       if (update.sessionUpdate === "available_commands_update")
         this.store.put("session-commands", key, readSlashCommands(update.availableCommands));
       if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text")
@@ -413,7 +476,7 @@ export class Runtime {
       slot = this.slots.get(key);
     if (!slot?.ready || ["closed", "error", "interrupted"].includes(s.status))
       throw new AppError("SESSION_UNAVAILABLE", "会话当前不可用，请恢复或创建会话", 409);
-    const busy = !!slot.active || this.store.commands(key, "queued").length > 0;
+    const busy = !!slot.active || !!slot.settingModel || this.store.commands(key, "queued").length > 0;
     if (mode === "steer" && (!s.capabilities?.steering || !slot.active))
       throw new AppError(
         "STEERING_UNSUPPORTED",
@@ -524,7 +587,7 @@ export class Runtime {
     for (const c of this.store.commands(undefined, "queued")) {
       if (this.runningCount() >= (this.options.maxConcurrent ?? 4)) break;
       const slot = this.slots.get(c.session);
-      if (slot?.ready && !slot.active && !slot.stopping) {
+      if (slot?.ready && !slot.active && !slot.settingModel && !slot.stopping) {
         slot.active = c.id;
         slot.cancelled = false;
         this.store.command({ ...c, status: "running" });

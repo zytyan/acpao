@@ -87,7 +87,8 @@ npm run test:ui
 
 | 工具       | 行为                                                                                                                       |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `delegate` | 异步委派独立会话；默认源 Host/cwd，可指定 Agent 或 worktree。可提供 `requestId` 去重。                                     |
+| `delegate` | 异步委派独立会话。可指定目标 Host、Agent、绝对目录 `cwd` 或 worktree。可提供 `requestId` 去重。 |
+| `directories` | 浏览指定在线主机的工作根目录。传入返回的子目录路径展开下一层，再将路径传给 `delegate`。 |
 | `send`     | `auto` 空闲立即、忙时排队；`queue` 同样串行调度；`immediate` 无法立即执行时失败；`steer` 明确返回 `STEERING_UNSUPPORTED`。 |
 | `wait`     | 一次等待 1–32 个会话，增量 `cursor`，`until=change/terminal`，最长 30 秒。摘要仅截取实际输出。                             |
 | `sessions` | list/get/history/create/cancel/close/resume。无恢复能力时返回明确错误。                                                    |
@@ -96,6 +97,12 @@ npm run test:ui
 MCP 提供 Streamable HTTP `/mcp`；ACP 客户端可通过 Streamable HTTP `/acp` 连接中心，两者都需要授权。`/acp` 支持文本 Prompt、流式消息、Session 创建/加载和取消；外部 ACP 客户端传入自己的 MCP Server 或非文本 Prompt 会收到明确错误。REST `/api/tools/:tool` 与 MCP 共享 Schema、授权和审计。
 
 同一会话最多排队 100 条；默认同时执行 4 个 Prompt、最多保持 32 个本地 ACP 进程。Agent 同源会话默认最多直接委派 16 个未关闭后代。取消会清空该 Session 的队列；Agent 3 秒未确认取消时终止进程。单次 Prompt 最长 10 分钟。恢复会话不等于自动重放中断的 Prompt。
+
+## 工作目录与模型
+
+创建会话时可输入绝对路径，或展开工作根目录树逐级选择。输入区底部的目录按钮可在所选目录开启同一 Agent 的新会话。旧会话和历史仍在会话列表中，工作区的主会话会切换到新目录。远端目录树需要新版 Gateway。
+
+Agent 通过 ACP 提供模型选项时，输入区会显示模型下拉框。会话空闲且没有排队消息时可切换当前会话的模型，保留当前对话。
 
 ## Remote Gateway
 

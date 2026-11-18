@@ -75,6 +75,21 @@ test(
     };
     const remoteConfigUrl = `/api/hosts/${identity.host}/agent`;
     const headers = { authorization: `Bearer ${adminToken}` };
+    const nested = resolve(folder, "nested", "project");
+    await mkdir(nested, { recursive: true });
+    const listing = await c.app.inject({
+      url: `/api/hosts/${identity.host}/directories`,
+      headers,
+      query: { cwd: resolve(folder, "nested") },
+    });
+    assert.equal(listing.statusCode, 200, listing.body);
+    assert.deepEqual(listing.json().entries, [{ name: "project", path: nested }]);
+    const forbidden = await c.app.inject({
+      url: `/api/hosts/${identity.host}/directories`,
+      headers,
+      query: { cwd: resolve(c.root, "..") },
+    });
+    assert.notEqual(forbidden.statusCode, 200);
     const failed = await c.app.inject({
       method: "POST", url: remoteConfigUrl, headers,
       payload: { agent: { ...remoteAgent, command: resolve(c.root, "nonexistent-agent") } },
@@ -89,7 +104,7 @@ test(
     assert.equal(c.store.db.prepare("SELECT COUNT(*) AS n FROM objects WHERE kind='dispatch' AND data LIKE ?")
       .get("%remote-secret-value-123%")?.n, 0);
     const session = await c.orchestration.create(
-      { host: identity.host, cwd: c.root, agent: remoteAgent.id, title: "Go remote" },
+      { host: identity.host, cwd: nested, agent: remoteAgent.id, title: "Go remote" },
       owner,
     );
     await until(
@@ -99,6 +114,15 @@ test(
     ).catch(() => {
       throw new Error(stderr);
     });
+    assert.equal(c.store.session(session.id).cwd, nested);
+    const model = await c.app.inject({ url: `/api/sessions/${session.id}/model`, method: "POST",
+      headers, payload: { value: "mock-deep" } });
+    assert.equal(model.statusCode, 200, model.body);
+    assert.equal(model.json().current, "mock-deep");
+    await until(
+      async () => (await c.app.inject({ url: `/api/sessions/${session.id}`, headers })).json().model?.current,
+      (value) => value === "mock-deep",
+    );
     const readCommands = async () =>
       (await c.app.inject({ url: `/api/sessions/${session.id}`, headers })).json().slashCommands;
     const commands = await until(readCommands, (value) => value.some((command: { name: string }) => command.name === "mcp"));

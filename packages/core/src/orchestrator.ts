@@ -13,12 +13,18 @@ import {
 } from "./types.js";
 export interface Remote {
   call(host: string, action: string, payload: unknown, commandId?: string): Promise<unknown>;
+  listDirectories(host: string, payload: unknown): Promise<unknown>;
 }
+export const DirectorySchema = z.object({
+  host: z.string().optional(),
+  cwd: z.string().min(1).max(4096).optional(),
+  offset: z.number().int().min(0).max(1_000_000).default(0),
+});
 export const ToolSchemas = {
   delegate: z.object({
     agent: z.string().optional(),
     host: z.string().optional(),
-    cwd: z.string().optional(),
+    cwd: DirectorySchema.shape.cwd,
     instruction: z.string().min(1).max(100000),
     title: z.string().max(120).optional(),
     isolate: z.boolean().default(false),
@@ -43,6 +49,7 @@ export const ToolSchemas = {
     title: z.string().max(120).optional(),
   }),
   hosts: z.object({ host: z.string().optional() }),
+  directories: DirectorySchema,
 };
 export type ToolName = keyof typeof ToolSchemas;
 export class Orchestrator {
@@ -65,6 +72,36 @@ export class Orchestrator {
   private assertAgentOrigin(p: Principal) {
     if (p.kind === "device" || (p.kind === "agent" && (!p.session || this.store.get<Session>("session", p.session)?.host !== p.host)))
       throw new AppError("HOST_FORBIDDEN", "凭据不允许操作此主机", 403);
+  }
+  async directories(input: unknown, p: Principal) {
+    this.assertAgentOrigin(p);
+    const v = DirectorySchema.parse(input);
+    const host = this.store.host(v.host ?? p.host ?? "local");
+    if (host.status !== "online") throw new AppError("HOST_OFFLINE", "主机未连接", 409);
+    if (p.kind === "admin") this.store.audit(p, "host.directories", host.id);
+    return host.kind === "local"
+      ? this.local.directories(v.cwd, v.offset)
+      : this.remote.listDirectories(host.id, { cwd: v.cwd, offset: v.offset });
+  }
+  async changeDirectory(key: string, cwd: string, p: Principal) {
+    const s = this.store.session(key);
+    this.authorize(p, s);
+    if (s.cwd === cwd) return s;
+    const main = this.store.get<string>("setting", "main") === key;
+    const result = await this.create({ host: s.host, agent: s.agent, title: s.title, cwd }, p, s.parent);
+    if (main && this.store.get<string>("setting", "main") === key) {
+      this.store.put("setting", "main", result.id);
+      this.store.event("", "main", {});
+    }
+    this.store.event(key, "session.directory.changed", { session: result.id, cwd: result.cwd });
+    return result;
+  }
+  async setModel(key: string, value: string, p: Principal) {
+    const s = this.store.session(key);
+    this.authorize(p, s);
+    this.store.audit(p, "session.model.set", key);
+    return s.host === "local" ? this.local.setModel(key, value)
+      : this.remote.call(s.host, "model.set", { session: key, value });
   }
   async create(input: unknown, p: Principal, parent?: string, sessionId = id("s")) {
     const v = CreateSchema.parse(input);
@@ -165,6 +202,7 @@ export class Orchestrator {
       title: s.title,
       agent: s.agent,
       host: s.host,
+      cwd: s.cwd,
       status: s.status,
       ...(s.parent ? { parent: s.parent } : {}),
       ...(s.stopReason ? { stopReason: s.stopReason } : {}),
@@ -188,12 +226,14 @@ export class Orchestrator {
           .all<import("./types.js").Host>("host")
           .filter((h) => (!v.host || h.id === v.host) && (p.kind === "admin" || h.status === "online"))
           .map((host) => p.kind === "admin" ? publicHost(host) : {
-            id: host.id, name: host.name, status: host.status,
+            id: host.id, name: host.name, status: host.status, cwd: host.cwd,
             agents: host.agents.map(({ id, name }) => ({ id, name })),
           });
       }
       case "send":
         return this.send(input, p);
+      case "directories":
+        return this.directories(input, p);
       case "delegate": {
         const v = ToolSchemas.delegate.parse(input),
           source = p.session ? this.store.session(p.session) : undefined,

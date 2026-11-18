@@ -6,6 +6,13 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const sessions = new Map();
 if (process.env.MOCK_STDERR) console.error(process.env.MOCK_STDERR, process.env.MOCK_TOKEN ?? "");
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const modelOptions = (currentValue = "mock-fast") => [{
+  id: "fixture-model", name: "模型", category: "model", type: "select", currentValue,
+  options: [{ group: "fixture", name: "测试模型", options: [
+    { value: "mock-fast", name: "Mock Fast" },
+    { value: "mock-deep", name: "Mock Deep" },
+  ] }],
+}];
 const announceCommands = (client, sessionId) =>
   client.notify(acp.methods.client.session.update, {
     sessionId,
@@ -29,7 +36,7 @@ const app = acp
     const sessionId = "mock-session";
     sessions.set(sessionId, { cancelled: false, running: false, mcp: params.mcpServers });
     await announceCommands(client, sessionId);
-    return { sessionId };
+    return { sessionId, configOptions: modelOptions() };
   })
   .onRequest(acp.methods.agent.session.load, async ({ params, client }) => {
     sessions.set(params.sessionId, {
@@ -37,7 +44,17 @@ const app = acp
       mcp: params.mcpServers,
     });
     await announceCommands(client, params.sessionId);
-    return {};
+    return { configOptions: modelOptions() };
+  })
+  .onRequest(acp.methods.agent.session.setConfigOption, async ({ params, client }) => {
+    await pause(75);
+    sessions.get(params.sessionId).model = params.value;
+    const configOptions = modelOptions(params.value);
+    await client.notify(acp.methods.client.session.update, {
+      sessionId: params.sessionId,
+      update: { sessionUpdate: "config_option_update", configOptions },
+    });
+    return { configOptions };
   })
   .onNotification(acp.methods.agent.session.cancel, ({ params }) => {
     const s = sessions.get(params.sessionId);
@@ -87,6 +104,7 @@ const app = acp
         return { stopReason: "cancelled" };
     }
     let output = `这是可控 ACP 测试 Agent 的真实协议输出，未调用模型。\n\n收到：${text}\n\n- [x] 建立独立 Session\n- [x] 完成流式响应\n\n配置真实 ACP Agent 后，即可开展实际工作。`;
+    if (text === "/current-model") output = s.model ?? "mock-fast";
     if (text.trim() === "/mcp")
       output = `MCP 服务：${s.mcp.map((server) => server.name).join("、") || "无"}`;
     if (text.startsWith("/delegate ")) {

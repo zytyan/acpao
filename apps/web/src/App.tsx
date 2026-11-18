@@ -42,9 +42,11 @@ import {
   type DiagnosticData,
 } from "./api";
 import { Mark, Status, Modal, Copy, relativeTime, Conversation, AgentForm } from "./ui";
+import { DirectoryInput } from "./DirectoryInput";
 import { version } from "../../../package.json";
 
 const gatewayRelease = `https://github.com/zytyan/acpao/releases/download/v${version}`;
+const shortDirectory = (path: string) => path.split(/[/\\]+/).filter(Boolean).slice(-2).join("/") || path;
 
 export default function App() {
   const [auth, setAuth] = useState<boolean | null>(null),
@@ -68,7 +70,7 @@ export default function App() {
     [toast, setToast] = useState(""),
     [online, setOnline] = useState(true),
     [collapsed, setCollapsed] = useState(false),
-    [modal, setModal] = useState<"create" | "agent" | "pair" | "search" | "diagnostics" | null>(
+    [modal, setModal] = useState<"create" | "directory" | "agent" | "pair" | "search" | "diagnostics" | null>(
       null,
     ),
     [search, setSearch] = useState(""),
@@ -85,6 +87,7 @@ export default function App() {
     [hostId, setHostId] = useState("local"),
     [agentId, setAgentId] = useState(""),
     [cwd, setCwd] = useState(""),
+    [directoryError, setDirectoryError] = useState(""),
     [title, setTitle] = useState(""),
     [isolate, setIsolate] = useState(false),
     [pairName, setPairName] = useState(""),
@@ -124,6 +127,8 @@ export default function App() {
   const host = hosts.find((h) => h.id === hostId);
   const agentHost = hosts.find((h) => h.id === agentHostId);
   const currentSession = sessions.find((s) => s.id === sessionId);
+  const currentHost = hosts.find((h) => h.id === currentSession?.host);
+  const currentModel = chat?.session.id === sessionId ? chat?.model : undefined;
   const composerDisabled = ["closed", "interrupted", "error", "creating"].includes(
     currentSession?.status ?? "creating",
   );
@@ -369,6 +374,35 @@ export default function App() {
       navigate(main ? "/workspace" : `/session/${s.id}`);
     } catch (e) {
       report(e);
+    } finally {
+      setWorking(false);
+    }
+  };
+  const changeDirectory = async () => {
+    if (!sessionId || working) return;
+    setDirectoryError("");
+    setWorking(true);
+    try {
+      const s = await api<Session>(`/sessions/${sessionId}/directory`, { cwd });
+      await refresh();
+      setModal(null);
+      if (route !== "/workspace") navigate(`/session/${s.id}`);
+      if (s.id !== sessionId) setToast("已在新目录开启会话，原会话仍可查看");
+    } catch (e) {
+      setDirectoryError(e instanceof Error ? e.message : "切换目录失败");
+    } finally {
+      setWorking(false);
+    }
+  };
+  const changeModel = async (value: string) => {
+    if (!sessionId || working) return;
+    setWorking(true);
+    try {
+      const model = await api<ChatData["model"]>(`/sessions/${sessionId}/model`, { value });
+      setChat((prior) => prior?.session.id === sessionId ? { ...prior, model } : prior);
+    } catch (e) {
+      report(e);
+      await refreshChat();
     } finally {
       setWorking(false);
     }
@@ -723,11 +757,7 @@ export default function App() {
                       </option>
                     ))}
                   </select>
-                  <label className="directory-label">
-                    <Folder size={14} />
-                    工作目录
-                    <input value={cwd || host.cwd} onChange={(e) => setCwd(e.target.value)} />
-                  </label>
+                  <DirectoryInput host={host.id} value={cwd || host.cwd} onChange={setCwd} />
                   <button
                     className="button primary start-button"
                     disabled={working}
@@ -996,11 +1026,30 @@ export default function App() {
                   disabled={composerDisabled}
                 />
                 <div className="composer-bottom">
-                  <span title={currentSession?.cwd}>
-                    <Folder size={14} />
-                    {currentSession?.cwd.split("/").filter(Boolean).slice(-2).join("/") ||
-                      "工作目录"}
-                  </span>
+                  <div className="composer-options">
+                    <button type="button" className="composer-directory" title={currentSession?.cwd}
+                      aria-label="切换工作目录" disabled={!currentSession || currentHost?.status !== "online" || working}
+                      onClick={() => {
+                        setDirectoryError("");
+                        setCwd(currentSession?.cwd ?? "");
+                        setModal("directory");
+                      }}>
+                      <Folder size={14} />
+                      <span>{currentSession?.cwd ? shortDirectory(currentSession.cwd) : "工作目录"}</span>
+                      <ChevronDown size={13} />
+                    </button>
+                    {currentModel && (
+                      <select title="模型" aria-label="模型" value={currentModel.current}
+                        disabled={working || composerDisabled || currentHost?.status !== "online" || busy(currentSession?.status) || !!chat?.queued}
+                        onChange={(e) => void changeModel(e.target.value)}>
+                        {!currentModel.choices.some((choice) => choice.value === currentModel.current) &&
+                          <option value={currentModel.current} disabled>{currentModel.current || "选择模型"}</option>}
+                        {currentModel.choices.map((choice) => (
+                          <option key={choice.value} value={choice.value}>{choice.name}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
                   <div>
                     {busy(currentSession?.status) && currentSession?.capabilities?.steering && (
                       <button
@@ -1087,6 +1136,7 @@ export default function App() {
                         <i>·</i>
                         {hosts.find((h) => h.id === s.host)?.name}
                         {s.id === config.main && <em>主 Agent</em>}
+                        {s.cwd && <span className="session-directory" title={s.cwd}>{shortDirectory(s.cwd)}</span>}
                       </span>
                     </div>
                     <Status status={s.status} />
@@ -1281,6 +1331,21 @@ export default function App() {
           {toast}
         </div>
       )}
+      {modal === "directory" && currentSession && (
+        <Modal title="切换工作目录" onClose={() => setModal(null)} canClose={!working}>
+          <p className="modal-description">在所选目录开启新会话。原会话和对话记录可在会话列表中查看。</p>
+          <form onSubmit={(e) => { e.preventDefault(); void changeDirectory(); }}>
+            <DirectoryInput host={currentSession.host} value={cwd} onChange={setCwd} initiallyOpen />
+            {directoryError && <p role="alert" className="modal-description">{directoryError}</p>}
+            <div className="form-actions">
+              <button className="button" type="button" disabled={working} onClick={() => setModal(null)}>取消</button>
+              <button className="button primary" disabled={working || !cwd.trim() || cwd === currentSession.cwd}>
+                {working && <LoaderCircle size={15} className="spin" />} 切换目录
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
       {modal === "create" && (
         <Modal title="开启一段新的工作" onClose={() => setModal(null)}>
           <p className="modal-description">独立的上下文，专注于一件事。</p>
@@ -1334,10 +1399,7 @@ export default function App() {
                 </select>
               </label>
             </div>
-            <label>
-              工作目录
-              <input value={cwd} onChange={(e) => setCwd(e.target.value)} required />
-            </label>
+            <DirectoryInput host={hostId} value={cwd} onChange={setCwd} />
             <label className="checkbox">
               <input
                 type="checkbox"

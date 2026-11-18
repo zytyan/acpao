@@ -45,11 +45,12 @@ export interface AppOptions {
 }
 const descriptions: Record<ToolName, string> = {
   delegate:
-    "将一件工作异步交给 Agent，返回独立会话。可用 hosts 发现其他在线主机；跨主机时默认采用目标主机工作目录。",
+    "将工作异步交给 Agent。用 hosts 选择主机、directories 查找目录，再将目标主机的绝对路径传给 cwd。跨主机且省略 cwd 时使用目标主机的工作根目录。",
   send: "给会话发送指令；明确返回立即或排队。不支持 Steering 时返回错误，不静默降级。",
   wait: "用一个游标等待多个会话的进展或终态，最长 30 秒；摘要仅截取 Agent 实际输出。",
   sessions: "列出、查看、读取历史、创建、取消、关闭或按实际能力恢复会话。",
   hosts: "发现在线主机与可用 Agent，用于选择委派目标。",
+  directories: "在已连接主机的工作根目录内列出一层子目录。省略 cwd 从根目录开始；用返回的子目录路径继续展开。next 存在时可传给 offset 翻页。",
 };
 export async function createApp(options: AppOptions = {}) {
   const streams = new Set<ServerResponse>();
@@ -597,6 +598,21 @@ export async function createApp(options: AppOptions = {}) {
     });
   });
   app.post("/api/sessions", async (req) => orchestration.create(req.body, admin(req)));
+  app.get("/api/hosts/:host/directories", async (req) => {
+    const query = z.object({
+      cwd: z.string().optional(),
+      offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
+    }).parse(req.query);
+    return orchestration.directories({ ...query, host: (req.params as { host: string }).host }, admin(req));
+  });
+  app.post("/api/sessions/:session/directory", async (req) => {
+    const { cwd } = z.object({ cwd: z.string().min(1).max(4096) }).parse(req.body);
+    return orchestration.changeDirectory((req.params as { session: string }).session, cwd, admin(req));
+  });
+  app.post("/api/sessions/:session/model", async (req) => {
+    const { value } = z.object({ value: z.string().min(1).max(512) }).parse(req.body);
+    return orchestration.setModel((req.params as { session: string }).session, value, admin(req));
+  });
   app.get("/api/sessions/:session", async (req) => {
     const p = admin(req),
       key = (req.params as { session: string }).session;
@@ -608,6 +624,7 @@ export async function createApp(options: AppOptions = {}) {
       session: store.session(key),
       messages: store.messages(key, query.before),
       slashCommands: store.get<SlashCommand[]>("session-commands", key) ?? [],
+      model: store.get("session-model", key) ?? null,
       approvals: store.approvals(key),
       queued: store.commands(key, "queued").length,
       queuedCommands: store.commands(key, "queued").map((c) => ({ id: c.id, text: c.text })),
@@ -716,7 +733,7 @@ export async function createApp(options: AppOptions = {}) {
   });
   app.post("/api/tools/:tool", async (req) => {
     const name = z
-      .enum(["delegate", "send", "wait", "sessions", "hosts"])
+      .enum(Object.keys(ToolSchemas) as ToolName[])
       .parse((req.params as { tool: string }).tool);
     const abort = new AbortController();
     req.raw.on("aborted", () => abort.abort());

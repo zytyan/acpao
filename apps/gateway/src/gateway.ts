@@ -90,6 +90,7 @@ export class Gateway {
           agents: this.options.agents.map((agent) => ({ ...agent, env: {} })),
           cwd: this.options.root,
           platform: process.platform,
+          browseDirectories: true,
         }),
       );
     });
@@ -170,9 +171,24 @@ export class Gateway {
     ]);
   }
   private async command(data: Record<string, unknown>) {
+    if (data.action === "directory.list") {
+      const key = z.string().parse(data.id);
+      try {
+        const { cwd, offset } = z.object({
+          cwd: z.string().optional(), offset: z.number().int().min(0).max(1_000_000).default(0),
+        }).parse(data.payload);
+        this.sendResult(key, { status: "done", result: await this.runtime.directories(cwd, offset) });
+      } catch (e) {
+        this.sendResult(key, { status: "done", error: {
+          code: e instanceof AppError ? e.code : "INVALID_DIRECTORY",
+          message: e instanceof AppError ? e.message : "目录查询失败",
+        } });
+      }
+      return;
+    }
     const key = z.string().parse(data.id),
       action = z
-        .enum(["create", "send", "cancel", "close", "resume", "approve"])
+        .enum(["create", "send", "cancel", "close", "resume", "approve", "model.set"])
         .parse(data.action),
       payload = data.payload as Record<string, unknown>,
       fingerprint = hash(JSON.stringify({ action, payload }));
@@ -225,6 +241,7 @@ export class Gateway {
             );
           else if (action === "cancel") result = await this.runtime.cancel(session);
           else if (action === "close") result = await this.runtime.close(session);
+          else if (action === "model.set") result = await this.runtime.setModel(session, z.string().parse(payload.value));
           else {
             const s = this.store.session(session),
               agent =

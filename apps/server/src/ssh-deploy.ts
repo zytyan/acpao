@@ -8,6 +8,7 @@ import { z } from "zod";
 import { generate } from "selfsigned";
 import { id, secret, type Store } from "../../../packages/core/src/store.js";
 import { AppError, type Host } from "../../../packages/core/src/types.js";
+import { ToolSchemas } from "../../../packages/core/src/orchestrator.js";
 import { gatewayBinary, type GatewayPlatform } from "./gateway-assets.js";
 import {
   SshPasswordVault,
@@ -330,7 +331,8 @@ export class SshDeploy {
         role === "agent" &&
         ((req.method === "GET" && path === "/api/tool-schema") ||
           (req.method === "POST" &&
-            (path === "/mcp" || /^\/api\/tools\/(delegate|send|wait|sessions|hosts)$/.test(path))));
+            (path === "/mcp" ||
+              (path.startsWith("/api/tools/") && Object.hasOwn(ToolSchemas, path.slice("/api/tools/".length))))));
       if (!authorization || !(deviceTokenRequest || agentToolRequest)) {
         res.writeHead(404).end();
         return;

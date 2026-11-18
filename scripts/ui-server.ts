@@ -1,8 +1,9 @@
 import { createApp } from "../apps/server/src/app.js";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 const root = await mkdtemp(resolve(tmpdir(), "acpao-ui-"));
+await mkdir(resolve(root, "Projects", "Nested App"), { recursive: true });
 const { app } = await createApp({
   dataDir: resolve(root, "data"),
   root,

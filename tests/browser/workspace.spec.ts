@@ -112,6 +112,26 @@ test("login → bootstrap → streamed workspace → delegation → approval →
   expect(errors).toEqual([]);
 });
 
+test("switches model in place and opens a new workspace session using the directory tree", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("工作区登录密钥").fill("browser-test-admin-secret-123456");
+  await page.getByRole("button", { name: "进入工作区" }).click();
+  const model = page.getByRole("combobox", { name: "模型" });
+  await expect(model).toHaveValue("mock-fast");
+  await model.selectOption("mock-deep");
+  await expect(model).toHaveValue("mock-deep");
+  await expect(page.locator(".message.assistant").last()).toContainText("测试委派结果");
+  await page.getByRole("button", { name: "切换工作目录" }).click();
+  await page.getByRole("button", { name: "展开 Projects" }).click();
+  await page.getByRole("button", { name: "Nested App", exact: true }).click();
+  await expect(page.getByLabel("工作目录", { exact: true })).toHaveValue(/Projects[/\\]Nested App$/);
+  await page.getByRole("button", { name: "切换目录", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "切换工作目录" })).toContainText("Projects/Nested App");
+  await expect(model).toHaveValue("mock-fast");
+  await expect(page.locator(".message.assistant")).toHaveCount(0);
+});
+
 test("diagnostics toggle, menu dismissal and Agent editor behave consistently", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("工作区登录密钥").fill("browser-test-admin-secret-123456");

@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -71,15 +70,21 @@ type bufferedCommands struct {
 type acpProcess struct {
 	updateSessionID string
 	earlyCommands   *bufferedCommands
+	earlyModel      *bufferedCommands
 	cmd             *exec.Cmd
 	probe           bool
 	stdin           io.WriteCloser
 	stdout          io.ReadCloser
 	stderr          io.ReadCloser
 	mu              sync.Mutex
+	submitMu        sync.Mutex
 	pending         map[string]chan rpcReply
 	next            int
 	closed          bool
+	ready           bool
+	settingModel    bool
+	modelRevision   int
+	model           *sessionModel
 	session         *session
 	gateway         *gateway
 	active          string
@@ -203,17 +208,24 @@ func (p *acpProcess) sessionUpdate(sessionID string, update json.RawMessage) {
 	if p.closed || sessionID == "" {
 		return
 	}
+	var kind struct {
+		Update string `json:"sessionUpdate"`
+	}
+	_ = json.Unmarshal(update, &kind)
 	if p.updateSessionID == "" {
-		var kind struct {
-			Update string `json:"sessionUpdate"`
-		}
-		if json.Unmarshal(update, &kind) == nil && kind.Update == "available_commands_update" {
+		switch kind.Update {
+		case "available_commands_update":
 			p.earlyCommands = &bufferedCommands{sessionID: sessionID, update: update}
+		case "config_option_update":
+			p.earlyModel = &bufferedCommands{sessionID: sessionID, update: update}
 		}
 		return
 	}
 	if sessionID != p.updateSessionID {
 		return
+	}
+	if kind.Update == "config_option_update" {
+		p.modelUpdate(update)
 	}
 	p.emitUpdate(update)
 }
@@ -235,6 +247,11 @@ func (p *acpProcess) bindUpdateSession(sessionID string) {
 		p.emitUpdate(value.update)
 	}
 	p.earlyCommands = nil
+	if value := p.earlyModel; value != nil && value.sessionID == sessionID {
+		p.modelUpdate(value.update)
+		p.emitUpdate(value.update)
+	}
+	p.earlyModel = nil
 }
 
 func (p *acpProcess) permission(id json.RawMessage, raw json.RawMessage) {
@@ -279,17 +296,28 @@ func (p *acpProcess) decide(approval, option string) error {
 		return errors.New("approval already resolved")
 	}
 }
-func (p *acpProcess) startPrompt(command queuedCommand) {
+func (p *acpProcess) startPrompt(command queuedCommand) bool {
 	p.mu.Lock()
-	if p.active != "" {
+	if p.active != "" || p.settingModel {
 		p.queue = append(p.queue, command)
 		p.mu.Unlock()
-		return
+		return false
 	}
 	p.active = command.ID
 	p.cancelled = false
 	p.mu.Unlock()
 	go p.runPrompt(command)
+	return true
+}
+func (p *acpProcess) startNextLocked() {
+	if p.closed || p.active != "" || p.settingModel || len(p.queue) == 0 {
+		return
+	}
+	next := p.queue[0]
+	p.queue = p.queue[1:]
+	p.active = next.ID
+	p.cancelled = false
+	go p.runPrompt(next)
 }
 func (p *acpProcess) runPrompt(command queuedCommand) {
 	p.gateway.updateSession(p.session, "running", "")
@@ -317,11 +345,6 @@ func (p *acpProcess) runPrompt(command queuedCommand) {
 	_ = p.gateway.store.put("command", command.ID, command)
 	p.mu.Lock()
 	p.active = ""
-	var next *queuedCommand
-	if !p.closed && len(p.queue) > 0 {
-		next = &p.queue[0]
-		p.queue = p.queue[1:]
-	}
 	if p.closed {
 		for _, queued := range p.queue {
 			queued.Status = "interrupted"
@@ -330,10 +353,8 @@ func (p *acpProcess) runPrompt(command queuedCommand) {
 		}
 		p.queue = nil
 	}
+	p.startNextLocked()
 	p.mu.Unlock()
-	if next != nil {
-		p.startPrompt(*next)
-	}
 }
 func (p *acpProcess) cancelQueue() {
 	p.mu.Lock()
@@ -389,17 +410,8 @@ func (p *acpProcess) promote(commandID string) (any, *wireError) {
 	p.queue = append(p.queue, queuedCommand{})
 	copy(p.queue[index+1:], p.queue[index:])
 	p.queue[index] = command
-	idle := p.active == ""
-	var next *queuedCommand
-	if idle && len(p.queue) > 0 {
-		first := p.queue[0]
-		next = &first
-		p.queue = p.queue[1:]
-	}
+	p.startNextLocked()
 	p.mu.Unlock()
-	if next != nil {
-		p.startPrompt(*next)
-	}
 	return map[string]any{"session": p.session.ID, "command": command.ID, "delivery": "queued", "status": p.session.Status, "reason": "notInjected"}, nil
 }
 func (p *acpProcess) stop() {
@@ -422,20 +434,9 @@ func (g *gateway) launch(s *session, config agentConfig, restore bool) error {
 }
 
 func (g *gateway) launchAgent(s *session, config agentConfig, restore, probe bool) error {
-	if !filepath.IsAbs(s.Cwd) {
-		return errors.New("working directory must be absolute")
-	}
-	root, err := filepath.EvalSymlinks(g.config.Root)
+	cwd, err := g.directory(s.Cwd)
 	if err != nil {
 		return err
-	}
-	cwd, err := filepath.EvalSymlinks(s.Cwd)
-	if err != nil {
-		return err
-	}
-	rel, err := filepath.Rel(root, cwd)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return errors.New("working directory outside allowed root")
 	}
 	s.Cwd = cwd
 	mcp := []any{}
@@ -489,6 +490,7 @@ func (g *gateway) launchAgent(s *session, config agentConfig, restore, probe boo
 			p.bindUpdateSession(s.ACPID)
 		}
 		g.emit(s.ID, "session.commands.reset", nil)
+		g.emit(s.ID, "session.model", nil)
 	} else {
 		defer p.stop()
 	}
@@ -548,17 +550,18 @@ func (g *gateway) launchAgent(s *session, config agentConfig, restore, probe boo
 	s.Capabilities.Steering = steer.Supported
 	s.ProcessID = cmd.Process.Pid
 	params := map[string]any{"cwd": s.Cwd, "mcpServers": mcp}
+	var response struct {
+		SessionID string `json:"sessionId"`
+		modelConfig
+	}
 	if restore {
 		if !s.Capabilities.Load {
 			p.stop()
 			return errors.New("session/load unsupported")
 		}
 		params["sessionId"] = s.ACPID
-		err = p.request(ctx, "session/load", params, nil)
+		err = p.request(ctx, "session/load", params, &response)
 	} else {
-		var response struct {
-			SessionID string `json:"sessionId"`
-		}
 		err = p.request(ctx, "session/new", params, &response)
 		s.ACPID = response.SessionID
 		if err == nil && s.ACPID == "" {
@@ -574,6 +577,12 @@ func (g *gateway) launchAgent(s *session, config agentConfig, restore, probe boo
 	}
 	if !probe {
 		g.updateSession(s, "idle", "")
+		p.mu.Lock()
+		if p.modelRevision == 0 {
+			p.publishModel(response.modelConfig)
+		}
+		p.ready = true
+		p.mu.Unlock()
 	}
 	return nil
 }

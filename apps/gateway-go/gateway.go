@@ -247,7 +247,7 @@ func (g *gateway) connect(ctx context.Context) error {
 	g.socket = ws
 	g.mu.Unlock()
 
-	if err = g.write(map[string]any{"type": "hello", "agents": g.publicAgents(), "cwd": g.config.Root, "platform": runtime.GOOS, "arch": runtime.GOARCH, "version": gatewayVersion, "managed": g.managed, "manageAgents": true}); err != nil {
+	if err = g.write(map[string]any{"type": "hello", "agents": g.publicAgents(), "cwd": g.config.Root, "platform": runtime.GOOS, "arch": runtime.GOARCH, "version": gatewayVersion, "managed": g.managed, "manageAgents": true, "browseDirectories": true}); err != nil {
 		return err
 	}
 	ws.SetReadLimit(4 * 1024 * 1024)
@@ -282,7 +282,13 @@ func (g *gateway) connect(ctx context.Context) error {
 			}
 			g.scheduleFlush()
 		case "command":
-			if strings.HasPrefix(msg.Action, "agent.") {
+			if msg.Action == "directory.list" {
+				go func(id string, payload json.RawMessage) {
+					result, problem := g.listDirectories(payload)
+					response, _ := json.Marshal(result)
+					g.result(receipt{ID: id, Status: "done", Result: response, Error: problem})
+				}(msg.ID, msg.Payload)
+			} else if strings.HasPrefix(msg.Action, "agent.") {
 				go func(id, action string, payload json.RawMessage) {
 					result, problem := g.agentCommand(action, payload)
 					response, _ := json.Marshal(result)
@@ -419,6 +425,7 @@ func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireErr
 		Approval string          `json:"approval"`
 		Option   string          `json:"option"`
 		Command  string          `json:"command"`
+		Value    string          `json:"value"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return fail("INVALID_COMMAND", "Invalid command payload")
@@ -477,6 +484,11 @@ func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireErr
 	process := g.processes[key]
 	g.mu.Unlock()
 	switch action {
+	case "model.set":
+		if process == nil {
+			return fail("SESSION_UNAVAILABLE", "会话当前未连接")
+		}
+		return process.setModel(payload.Value)
 	case "promote":
 		if process == nil {
 			return fail("SESSION_UNAVAILABLE", "ACP process is not connected")
@@ -493,10 +505,17 @@ func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireErr
 		if mode == "" {
 			mode = "auto"
 		}
+		process.submitMu.Lock()
+		defer process.submitMu.Unlock()
 		process.mu.Lock()
 		active := process.active != ""
+		modelChanging := process.settingModel
+		ready := process.ready && !process.closed
 		process.mu.Unlock()
-		if mode == "immediate" && active {
+		if !ready {
+			return fail("SESSION_UNAVAILABLE", "会话当前未连接")
+		}
+		if mode == "immediate" && (active || modelChanging) {
 			return fail("SESSION_BUSY", "Session is already running")
 		}
 		if mode == "steer" && (!s.Capabilities.Steering || !active) {
@@ -532,9 +551,8 @@ func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireErr
 				return fail("STEERING_NOT_APPLIED", "Agent did not accept steering")
 			}
 		}
-		process.startPrompt(command)
 		delivery := "immediate"
-		if active {
+		if !process.startPrompt(command) {
 			delivery = "queued"
 		}
 		return map[string]any{"session": key, "command": id, "delivery": delivery, "status": s.Status}, nil
