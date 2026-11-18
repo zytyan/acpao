@@ -48,6 +48,8 @@ Dockerfile 提供可选 Node 镜像入口，默认普通 `node` 用户。镜像�
 
 在「主机 → 配对主机 → 通过 SSH 添加」填写远程主机的 SSH 别名或 `user@host`。中心使用运行该服务的账户的 OpenSSH 配置、密钥或 ssh-agent。首次使用前，请从中心机器核对目标与跳板的主机指纹，并保存到该账户的 `known_hosts`。可选的 `ACPAO_SSH_CONFIG` 指定中心使用的 SSH 配置文件。
 
+目标也支持 SSH 密码认证。密码经 AES-GCM 加密保存在中心，用于重启后恢复反向隧道。中心数据备份应保留 `ssh-secrets/key`，并与数据库一起限制访问。撤销主机会删除该主机的加密密码。密码用于目标主机，SSH 跳板继续使用中心已有的密钥配置。使用密码时，目标公钥需要已存在于 `known_hosts`。
+
 中心自动识别 Linux x64、Linux ARM64 或 Windows x64，从当前中心二进制解压对应 Gateway 并通过 SSH 上传。远程机器无需访问 GitHub，也无需 Node.js 或 zstd。用于编译中心二进制的 Node.js 与 Go 只需要在构建机器上可用。源码开发模式可先运行 `npm run build:gateway-assets`。
 
 SSH 服务端需要允许反向 TCP 转发，使用 `GatewayPorts no` 或 `clientspecified`。中心只转发 Gateway 用到的接口，并自动生成和固定隧道内部的 TLS 证书。中心可以维持默认的本机 HTTP 地址，无需公网 HTTPS 或证书。中心重启会从 SQLite 重新建立隧道。已完全离线的 Gateway 继续执行本地工作，连接恢复后补发事件。

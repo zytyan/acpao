@@ -22,9 +22,10 @@ for (const [name, entry] of Object.entries(entries))
     target: "node24",
     packages: "bundle",
     banner: {
-      js: `import {createRequire as __seaCreateRequire} from 'node:module';const require=__seaCreateRequire(import.meta.url);`,
+      js: `import {createRequire as __seaCreateRequire} from 'node:module';const require=__seaCreateRequire(import.meta.url);const __dirname=import.meta.dirname;`,
     },
-    external: ["node:*"],
+    // ssh2 falls back to Node crypto when its optional native accelerators are absent.
+    external: ["node:*", "cpu-features", "*/sshcrypto.node"],
   });
 async function walk(dir) {
   let result = [];

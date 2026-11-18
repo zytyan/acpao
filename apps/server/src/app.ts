@@ -121,7 +121,7 @@ export async function createApp(options: AppOptions = {}) {
     store.put("host", "local", { ...h, status: "online", cwd: root });
   }
   const remote = new RemoteHub(store, app.server);
-  const sshDeploy = new SshDeploy(store, app.server, project);
+  const sshDeploy = new SshDeploy(store, app.server, project, data);
   app.addHook("onListen", async () => { sshDeploy.restore(); });
   const agentToken = (s: Session) => {
     store.revoke("agent", s.id);

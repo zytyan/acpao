@@ -80,6 +80,7 @@ export default function App() {
     [isolate, setIsolate] = useState(false),
     [pairName, setPairName] = useState(""),
     [pairMode, setPairMode] = useState<"ssh" | "manual">("ssh"),
+    [sshAuth, setSshAuth] = useState<"key" | "password">("key"),
     [sshPending, setSshPending] = useState(false),
     [sshError, setSshError] = useState(""),
     [sshResult, setSshResult] = useState<{ online: boolean } | null>(null),
@@ -1034,6 +1035,7 @@ export default function App() {
                 onClick={() => {
                   setPair(null);
                   setPairMode("ssh");
+                  setSshAuth("key");
                   setSshResult(null);
                   setSshError("");
                   setModal("pair");
@@ -1330,6 +1332,7 @@ export default function App() {
                 ...(get("port") ? { port: Number(get("port")) } : {}),
                 jump: get("jump") || undefined,
                 root: get("root") || undefined,
+                ...(sshAuth === "password" ? { password: values.get("password") } : {}),
               }).then((result) => {
                 setSshResult(result);
                 void refresh();
@@ -1339,11 +1342,22 @@ export default function App() {
               <fieldset className="ssh-fields" disabled={sshPending}>
                 <p className="modal-description">中心会上传内置 Gateway，并维持 SSH 隧道。无需给中心配置 HTTPS。</p>
                 <label>主机名称<input value={pairName} onChange={(event) => setPairName(event.target.value)} required maxLength={100} placeholder="例如：开发服务器" /></label>
-                <label>SSH 主机<input name="target" placeholder="例如：devbox 或 dev@10.0.0.12" required maxLength={255} /></label>
-                <p className="hint">使用中心账户的 SSH 密钥或 ssh-agent。首次连接请在中心机器核对并保存 SSH 主机指纹。</p>
+                <div className="ssh-address">
+                  <label>SSH 主机<input name="target" placeholder="例如：devbox 或 dev@10.0.0.12" required maxLength={255} /></label>
+                  <label>SSH 端口<input name="port" inputMode="numeric" type="number" min="1" max="65535" placeholder="默认" /></label>
+                </div>
+                <label>认证方式
+                  <select value={sshAuth} onChange={(event) => setSshAuth(event.target.value as typeof sshAuth)}>
+                    <option value="key">SSH 密钥 / ssh-agent</option>
+                    <option value="password">SSH 密码</option>
+                  </select>
+                </label>
+                {sshAuth === "password" && (
+                  <label>SSH 密码<input name="password" type="password" autoComplete="new-password" required maxLength={1024} /></label>
+                )}
+                <p className="hint">首次连接请在中心机器核对并保存 SSH 主机指纹。{sshAuth === "password" && "密码会加密保存在中心，用于隧道自动重连。跳板仍使用 SSH 密钥。"}</p>
                 <details className="ssh-options">
                   <summary>连接选项</summary>
-                  <label>SSH 端口<input name="port" inputMode="numeric" type="number" min="1" max="65535" placeholder="使用 SSH 配置" /></label>
                   <label>SSH 跳板<input name="jump" maxLength={255} placeholder="例如：bastion" /></label>
                   <label>远程工作目录<input name="root" maxLength={1024} placeholder="默认使用远程用户的家目录" /></label>
                 </details>

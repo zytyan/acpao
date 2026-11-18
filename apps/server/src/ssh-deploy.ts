@@ -9,6 +9,16 @@ import { generate } from "selfsigned";
 import { id, secret, type Store } from "../../../packages/core/src/store.js";
 import { AppError, type Host } from "../../../packages/core/src/types.js";
 import { gatewayBinary, type GatewayPlatform } from "./gateway-assets.js";
+import {
+  SshPasswordVault,
+  execWithPassword,
+  passwordTunnel,
+  resolvePasswordTarget,
+  sshConfigArgs,
+  sshProcessEnv,
+  type SealedPassword,
+  type SshTarget,
+} from "./ssh-password.js";
 
 const address = z
   .string()
@@ -25,13 +35,14 @@ export const sshDeploySchema = z.object({
   port: z.number().int().min(1).max(65535).optional(),
   jump: address.optional(),
   root: z.string().trim().max(1024).optional(),
+  password: z.string().min(1).max(1024).optional(),
 });
-type Target = Pick<z.infer<typeof sshDeploySchema>, "target" | "port" | "jump">;
-type Tunnel = Target & { host: string; portAtGateway: number };
+type Tunnel = SshTarget & { host: string; portAtGateway: number; sealedPassword?: SealedPassword };
+type RunCommand = (command: string, stage: string, input?: Buffer | string) => Promise<string>;
 
-function sshArgs(target: Target, forward?: string) {
+function sshArgs(target: SshTarget, forward?: string) {
   return [
-    ...(process.env.ACPAO_SSH_CONFIG ? ["-F", process.env.ACPAO_SSH_CONFIG] : []),
+    ...sshConfigArgs(),
     "-T",
     "-o",
     "BatchMode=yes",
@@ -62,14 +73,10 @@ function sshArgs(target: Target, forward?: string) {
     target.target,
   ];
 }
-function sshEnv() {
-  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^ACPAO_/i.test(key)));
-}
-
-function runSSH(target: Target, command: string, stage: string, input?: Buffer | string) {
+function runSSH(target: SshTarget, command: string, stage: string, input?: Buffer | string) {
   return new Promise<string>((resolve, reject) => {
     const child = spawn("ssh", [...sshArgs(target), command], {
-      env: sshEnv(),
+      env: sshProcessEnv(),
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
       signal: AbortSignal.timeout(45000),
@@ -112,18 +119,17 @@ const powerShell = (script: string) =>
   "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " +
   Buffer.from(script, "utf16le").toString("base64");
 
-async function platformFor(target: Target): Promise<GatewayPlatform> {
+async function platformFor(run: RunCommand): Promise<GatewayPlatform> {
   let linux: string | undefined;
   try {
-    linux = await runSSH(target, "uname -sm", "读取目标平台");
+    linux = await run("uname -sm", "读取目标平台");
   } catch (err) {
     if (err instanceof AppError && err.message.includes("。")) throw err;
   }
   if (linux && /^Linux\s+(x86_64|amd64)$/im.test(linux)) return "linux-x64";
   if (linux && /^Linux\s+(aarch64|arm64)$/im.test(linux)) return "linux-arm64";
   if (!linux || /windows|mingw|msys|cygwin/i.test(linux)) {
-    const windows = await runSSH(
-      target,
+    const windows = await run(
       powerShell(
         "[Console]::WriteLine([Runtime.InteropServices.RuntimeInformation]::OSArchitecture)",
       ),
@@ -179,13 +185,17 @@ export class SshDeploy {
   private proxy?: HttpsServer;
   private proxyStarting?: Promise<{ port: number; cert: string }>;
   private readonly proxySockets = new Set<Socket>();
+  private readonly passwords: SshPasswordVault;
   private stopped = false;
 
   constructor(
     private readonly store: Store,
     private readonly center: Server,
     private readonly project: string,
-  ) {}
+    data: string,
+  ) {
+    this.passwords = new SshPasswordVault(data);
+  }
 
   restore() {
     for (const tunnel of this.store.all<Tunnel>("ssh-tunnel")) {
@@ -333,20 +343,26 @@ export class SshDeploy {
         try {
           const { port } = await this.ingress();
           if (signal.aborted) break;
-          const child = spawn(
-            "ssh",
-            sshArgs(tunnel, `127.0.0.1:${tunnel.portAtGateway}:127.0.0.1:${port}`),
-            {
-              env: sshEnv(),
-              windowsHide: true,
-              stdio: ["ignore", "ignore", "ignore"],
-              signal,
-            },
-          );
-          await new Promise<void>((resolve) => {
-            child.once("close", () => resolve());
-            child.once("error", () => resolve());
-          });
+          if (tunnel.sealedPassword) {
+            const password = await this.passwords.open(tunnel.host, tunnel.sealedPassword);
+            const destination = await resolvePasswordTarget(tunnel);
+            await passwordTunnel(destination, password, tunnel.portAtGateway, port, signal);
+          } else {
+            const child = spawn(
+              "ssh",
+              sshArgs(tunnel, `127.0.0.1:${tunnel.portAtGateway}:127.0.0.1:${port}`),
+              {
+                env: sshProcessEnv(),
+                windowsHide: true,
+                stdio: ["ignore", "ignore", "ignore"],
+                signal,
+              },
+            );
+            await new Promise<void>((resolve) => {
+              child.once("close", () => resolve());
+              child.once("error", () => resolve());
+            });
+          }
         } catch {
           // Retry an unavailable ingress with the same remote port.
         }
@@ -372,15 +388,30 @@ export class SshDeploy {
   }
 
   async deploy(input: z.infer<typeof sshDeploySchema>, actor: Parameters<Store["audit"]>[0]) {
-    const { name, root, target, port, jump } = input;
+    const { name, root, target, port, jump, password } = input;
     const ssh = { target, port, jump };
-    const platform = await platformFor(ssh);
+    let run: RunCommand;
+    if (password !== undefined) {
+      const destination = await resolvePasswordTarget(ssh);
+      run = (command, stage, stdin) =>
+        execWithPassword(destination, password, command, stage, stdin);
+    } else {
+      run = (command, stage, stdin) => runSSH(ssh, command, stage, stdin);
+    }
+    const platform = await platformFor(run);
     const binary = await gatewayBinary(platform, this.project);
     const host = id("h"),
       token = secret();
-    const tunnel: Tunnel = { ...ssh, host, portAtGateway: randomInt(20000, 60000) };
+    const tunnel: Tunnel = {
+      ...ssh,
+      host,
+      portAtGateway: randomInt(20000, 60000),
+      ...(password !== undefined
+        ? { sealedPassword: await this.passwords.seal(host, password) }
+        : {}),
+    };
     const commands = gatewayCommands(host, platform);
-    await runSSH(ssh, commands.upload, "上传内置 Gateway", binary);
+    await run(commands.upload, "上传内置 Gateway", binary);
     if (this.stopped) throw new AppError("SSH_CENTER_UNAVAILABLE", "中心正在停止", 503);
     const { cert } = await this.ingress();
     this.store.transaction(() => {
@@ -398,8 +429,7 @@ export class SshDeploy {
     });
     this.start(tunnel);
     try {
-      await runSSH(
-        ssh,
+      await run(
         commands.provision,
         "配置并启动 Gateway",
         JSON.stringify({

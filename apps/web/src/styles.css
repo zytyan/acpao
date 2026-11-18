@@ -2206,6 +2206,12 @@ pre {
   border: 0;
 }
 
+.ssh-address {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 10px;
+}
+
 .ssh-options {
   margin-block: 14px;
 }
