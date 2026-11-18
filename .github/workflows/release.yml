@@ -50,7 +50,7 @@ jobs:
           suffix=""
           if [ "${{ matrix.platform }}" = windows ]; then suffix=".exe"; fi
           cp "sea-build/${{ matrix.filename }}" "release/acpao-${{ matrix.platform }}-${{ matrix.arch }}${suffix}"
-          (cd apps/gateway-go && CGO_ENABLED=0 go build -buildvcs=false -trimpath -o "$GITHUB_WORKSPACE/release/acpao-gateway-${{ matrix.platform }}-${{ matrix.arch }}${suffix}" .)
+          cp "sea-build/gateways/acpao-gateway-${{ matrix.platform }}-${{ matrix.arch }}${suffix}" "release/acpao-gateway-${{ matrix.platform }}-${{ matrix.arch }}${suffix}"
           "release/acpao-gateway-${{ matrix.platform }}-${{ matrix.arch }}${suffix}" --version
           if [ "${{ matrix.platform }}" = windows ]; then
             (cd apps/gateway-go && CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags='-H=windowsgui' -o "$GITHUB_WORKSPACE/release/acpao-open-${{ matrix.platform }}-${{ matrix.arch }}${suffix}" ./launcher)

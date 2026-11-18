@@ -5,7 +5,18 @@ const { getAsset, isSea } = require("node:sea");
 (async () => {
   if (!isSea()) throw new Error("ACPAO SEA executable required");
   if (process.argv.includes("--acpao-build-info")) {
-    console.log("ACPAO standalone executable");
+    const { zstdDecompressSync } = require("node:zlib");
+    const platforms = ["linux-x64", "linux-arm64", "windows-x64"];
+    for (const platform of platforms) {
+      const binary = zstdDecompressSync(Buffer.from(getAsset("gateways/" + platform + ".zst")));
+      if (
+        platform === "windows-x64"
+          ? binary.toString("ascii", 0, 2) !== "MZ"
+          : binary.toString("ascii", 1, 4) !== "ELF"
+      )
+        throw new Error("Invalid embedded Gateway: " + platform);
+    }
+    console.log("ACPAO standalone executable with embedded Gateways: " + platforms.join(", "));
     process.exit(0);
   }
   const command = process.env.ACPAO_SEA_MODE || process.argv[1],

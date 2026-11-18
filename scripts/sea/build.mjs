@@ -55,6 +55,10 @@ const config = {
 for (const key of ["server", "gateway", "mcp-bridge", "mock-agent", "web-files.json"])
   config.assets[key] = resolve(out, key === "web-files.json" ? key : key + ".mjs");
 for (const name of names) config.assets["web/" + name] = resolve(out, "web", name);
+for (const platform of ["linux-x64", "linux-arm64", "windows-x64"]) {
+  const name = "gateways/" + platform + ".zst";
+  config.assets[name] = resolve(out, name);
+}
 await writeFile(resolve(out, "sea-config.json"), JSON.stringify(config, null, 2));
 const exec = process.platform === "win32" ? "node.exe" : "node";
 const n = spawnSync(exec, ["--experimental-sea-config", resolve(out, "sea-config.json")], {

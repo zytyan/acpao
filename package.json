@@ -19,7 +19,8 @@
     "format": "prettier --write apps packages scripts tests docs README.md *.json *.ts",
     "probe:agent": "node --import tsx scripts/probe-agent.ts",
     "check": "npm run typecheck && npm test && npm run build",
-    "build:binary": "npm run build && node scripts/sea/build.mjs"
+    "build:gateway-assets": "node scripts/sea/gateway-assets.mjs",
+    "build:binary": "npm run build && npm run build:gateway-assets && node scripts/sea/build.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "2.7.0",
@@ -40,6 +41,7 @@
     "react-dom": "19.3.1",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
+    "selfsigned": "5.5.0",
     "ws": "8.23.0",
     "zod": "4.6.7"
   },
