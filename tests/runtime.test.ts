@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { symlink } from "node:fs/promises";
 import { setup, until, owner } from "./helpers.js";
 import type { Command } from "../packages/core/src/types.js";
@@ -202,10 +202,15 @@ test("noncooperative cancel escalates and cancels queued prompts", async (t) => 
 });
 test("cwd policy rejects paths outside root and symlink escape", async (t) => {
   const c = await setup(t);
-  await assert.rejects(c.runtime.directory("/tmp"), {
+  const outside = dirname(c.root);
+  await assert.rejects(c.runtime.directory(outside), {
     code: "DIRECTORY_FORBIDDEN",
   });
-  await symlink("/tmp", resolve(c.root, "escape"));
+  await symlink(
+    outside,
+    resolve(c.root, "escape"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
   await assert.rejects(c.runtime.directory(resolve(c.root, "escape")), {
     code: "DIRECTORY_FORBIDDEN",
   });
@@ -236,6 +241,7 @@ test("Git worktree opt-in isolates edits while keeping the source repository int
   const run = promisify(execFile),
     c = await setup(t);
   await run("git", ["init", "-q", c.root]);
+  await run("git", ["-C", c.root, "config", "core.autocrlf", "false"]);
   await writeFile(resolve(c.root, "baseline.txt"), "original\n");
   await run("git", ["-C", c.root, "add", "baseline.txt"]);
   await run("git", [
