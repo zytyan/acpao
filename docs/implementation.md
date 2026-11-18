@@ -26,6 +26,10 @@ Go Gateway 为独立可执行文件，支持 Linux x64、Linux ARM64、Windows x
 
 中心的自包含二进制随附 Zstandard 压缩的 Linux x64、Linux ARM64 和 Windows x64 Gateway。主机页可通过 SSH 识别目标平台、上传并启动 Gateway；中心托管的反向隧道采用固定证书，支持中心只提供本机 HTTP。无法从中心 SSH 登录的主机仍可通过手动命令配对。Agent 安装/登录需在目标设备完成。ACP 权限请求不是 OS 沙箱，部署时仍需使用合适的系统账户或容器隔离。
 
+## 暂缓事项
+
+- **中心可执行文件体积裁剪（低优先级）**：保留现有打包方式。仅在发行平台的单文件大小上限、部署空间或下载条件已实际阻碍交付时重新评估。Linux x64 原型将 v0.2.1 的中心从 146.1 MiB 减至 122.9 MiB，验证了剥离 Node 符号和压缩内置 JavaScript 的收益，供后续参考。
+
 ## 验证记录
 
 本机最近一次完整回归：`npm run typecheck`、`npm run build`、`npm test`（34 项通过，启用 `GO_GATEWAY_BIN`）和 `npm run test:ui`（4 项通过）。自包含中心二进制完成 ACP HTTP 冒烟测试。Go Gateway 和启动器已交叉编译 Linux x64/ARM64、Windows x64；Windows 启动器的 PE 类型为 GUI。可控测试不调用付费模型。发布前仍会再运行一次完整回归，并以 GitHub Actions 构建产物为最终发布验证。
