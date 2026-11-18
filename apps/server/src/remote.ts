@@ -17,6 +17,7 @@ const Hello = z.object({
   agents: z.array(AgentSchema).max(30),
   cwd: z.string().max(4096),
   platform: z.string().max(100),
+  manageAgents: z.boolean().optional(),
 });
 const EventSchema = z.object({
   seq: z.number().int().positive(),
@@ -38,6 +39,7 @@ export class RemoteHub {
       reject: (e: Error) => void;
       timer: NodeJS.Timeout;
       promise?: Promise<unknown>;
+      transientHost?: string;
     }
   >();
   private heartbeat: NodeJS.Timeout;
@@ -94,6 +96,7 @@ export class RemoteHub {
             agents: h.agents,
             cwd: h.cwd,
             platform: h.platform,
+            manageAgents: h.manageAgents,
             lastSeen: Date.now(),
           });
           ws.send(
@@ -125,15 +128,16 @@ export class RemoteHub {
         } else if (data.type === "result") {
           const key = z.string().parse(data.id),
             receipt = this.store.get<{ host: string }>("dispatch", key);
-          if (receipt?.host !== host) throw new Error("foreign response");
-          this.store.put("dispatch", key, {
+          const waiter = this.waiting.get(key);
+          if (!receipt && key.startsWith("agent_") && !waiter) return; // Late management reply.
+          if ((receipt?.host ?? waiter?.transientHost) !== host) throw new Error("foreign response");
+          if (receipt) this.store.put("dispatch", key, {
             ...receipt,
             id: key,
             status: "done",
             result: data.result,
             error: data.error,
           });
-          const waiter = this.waiting.get(key);
           if (waiter) {
             clearTimeout(waiter.timer);
             this.waiting.delete(key);
@@ -177,6 +181,11 @@ export class RemoteHub {
     const s = e.session ? this.store.get<Session>("session", e.session) : undefined;
     if (e.session && s?.host !== host) throw new Error("foreign session event");
     this.store.transaction(() => {
+      if (e.kind === "agents" && !e.session) {
+        const agents = z.array(AgentSchema).max(30).parse(e.data);
+        const current = this.store.host(host);
+        this.store.put("host", host, { ...current, agents });
+      }
       if (e.kind === "session" && s) {
         const update = e.data as Session;
         if (update.id !== s.id || update.host !== host) throw new Error("invalid session");
@@ -249,6 +258,27 @@ export class RemoteHub {
       }
       this.store.event(e.session, e.kind, e.data, host, e.seq);
       this.store.put("gateway-cursor", host, e.seq);
+    });
+  }
+  manageAgent(host: string, action: "agent.get" | "agent.configure", payload: unknown) {
+    const ws = this.peers.get(host);
+    if (!ws || ws.readyState !== WebSocket.OPEN)
+      throw new AppError("HOST_OFFLINE", "Gateway 未连接，请重连后再配置 Agent。", 409);
+    if (!this.store.host(host).manageAgents)
+      throw new AppError("GATEWAY_UPDATE_REQUIRED", "此 Gateway 版本需要升级后才能在界面配置 Agent。", 409);
+    const key = id("agent");
+    return new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waiting.delete(key);
+        reject(new AppError("AGENT_CONFIGURATION_UNCONFIRMED", "网关尚未确认，请刷新主机后检查是否保存。", 504));
+      }, 30000);
+      this.waiting.set(key, { resolve, reject, timer, transientHost: host });
+      ws.send(JSON.stringify({ type: "command", id: key, action, payload }), (error) => {
+        if (!error) return;
+        clearTimeout(timer);
+        this.waiting.delete(key);
+        reject(new AppError("HOST_OFFLINE", "无法向 Gateway 发送指令。", 409));
+      });
     });
   }
   async call(host: string, action: string, payload: unknown, key = id("remote")): Promise<unknown> {

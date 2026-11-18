@@ -1,29 +1,15 @@
-import { access } from "node:fs/promises";
-import { constants } from "node:fs";
-import { delimiter, isAbsolute, resolve } from "node:path";
 import { Store, id } from "../../../packages/core/src/store.js";
+import { findAgentExecutable } from "../../../packages/core/src/agent-spawn.js";
+import { agentEnvironment } from "../../../packages/core/src/agent-command.js";
 import { Runtime } from "../../../packages/core/src/runtime.js";
 import { AppError, type AgentConfig, type Session } from "../../../packages/core/src/types.js";
 
-async function findExecutable(command: string): Promise<string | null> {
-  const pathLike = isAbsolute(command) || /[\\/]/.test(command);
-  const paths = pathLike
-    ? [resolve(command)]
-    : (process.env.PATH ?? "").split(delimiter).map((dir) => resolve(dir, command));
-  const extensions = process.platform === "win32" && !/\.[a-z0-9]+$/i.test(command)
-    ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")
-    : [""];
-  for (const path of paths)
-    for (const extension of extensions)
-      try {
-        await access(path + extension, constants.X_OK);
-        return path + extension;
-      } catch {}
-  return null;
-}
-
 export async function probeAgent(config: AgentConfig, root: string) {
-  const executable = await findExecutable(config.command);
+  const executable = await findAgentExecutable(
+    config.command,
+    root,
+    agentEnvironment(config.env, process.env, process.platform),
+  );
   if (!executable)
     return {
       ok: false as const,
@@ -62,10 +48,7 @@ export async function probeAgent(config: AgentConfig, root: string) {
     return {
       ok: false as const,
       stage,
-      message:
-        error instanceof AppError || error instanceof Error
-          ? error.message
-          : "ACP 连接失败",
+      message: error instanceof AppError || error instanceof Error ? error.message : "ACP 连接失败",
       stderr,
     };
   } finally {

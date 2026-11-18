@@ -6,6 +6,7 @@ import { resolve, relative, isAbsolute } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Store, id } from "./store.js";
+import { prepareAgentSpawn } from "./agent-spawn.js";
 import { agentEnvironment } from "./agent-command.js";
 import {
   detectExtensions,
@@ -182,9 +183,13 @@ export class Runtime {
       for (const value of secretValues) text = text.replaceAll(value, "[已隐藏]");
       return text.replace(/Bearer\s+\S+/gi, "Bearer [已隐藏]");
     };
-    const child = spawn(config.command, config.args, {
+    const env = agentEnvironment(config.env, process.env, process.platform);
+    const executable = await prepareAgentSpawn(config.command, config.args, s.cwd, env);
+    const child = spawn(executable.command, executable.args, {
       cwd: s.cwd,
-      env: agentEnvironment(config.env, process.env, process.platform),
+      env,
+      windowsVerbatimArguments: executable.verbatim,
+      windowsHide: true,
       stdio: "pipe",
       detached: process.platform !== "win32",
     });

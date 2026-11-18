@@ -56,6 +56,7 @@ export interface Host {
   agents: AgentConfig[];
   cwd: string;
   platform?: string;
+  manageAgents?: boolean;
   lastSeen?: number;
   error?: string;
 }

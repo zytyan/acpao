@@ -65,6 +65,7 @@ type rpcReply struct {
 }
 type acpProcess struct {
 	cmd         *exec.Cmd
+	probe       bool
 	stdin       io.WriteCloser
 	stdout      io.ReadCloser
 	stderr      io.ReadCloser
@@ -137,6 +138,9 @@ func (p *acpProcess) listen() {
 			continue
 		}
 		if msg.Method == "session/update" {
+			if p.probe {
+				continue
+			}
 			var params struct {
 				SessionID string          `json:"sessionId"`
 				Update    json.RawMessage `json:"update"`
@@ -147,6 +151,10 @@ func (p *acpProcess) listen() {
 			continue
 		}
 		if msg.Method == "session/request_permission" {
+			if p.probe {
+				_ = p.send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}})
+				continue
+			}
 			go p.permission(msg.ID, msg.Params)
 			continue
 		}
@@ -371,6 +379,10 @@ func (p *acpProcess) stop() {
 	}
 }
 func (g *gateway) launch(s *session, config agentConfig, restore bool) error {
+	return g.launchAgent(s, config, restore, false)
+}
+
+func (g *gateway) launchAgent(s *session, config agentConfig, restore, probe bool) error {
 	if !filepath.IsAbs(s.Cwd) {
 		return errors.New("working directory must be absolute")
 	}
@@ -387,15 +399,22 @@ func (g *gateway) launch(s *session, config agentConfig, restore bool) error {
 		return errors.New("working directory outside allowed root")
 	}
 	s.Cwd = cwd
-	token, err := g.sessionToken(s.ID)
+	mcp := []any{}
+	if !probe {
+		token, err := g.sessionToken(s.ID)
+		if err != nil {
+			return err
+		}
+		self, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		mcp = append(mcp, map[string]any{"name": "acpao", "command": self, "args": []string{"--mcp-bridge"}, "env": []map[string]string{{"name": "ACPAO_CENTER", "value": g.config.Center}, {"name": "ACPAO_CENTER_CERTIFICATE", "value": g.config.CenterCertificate}, {"name": "ACPAO_TOKEN", "value": token}, {"name": "ACPAO_SSH_JUMP", "value": g.config.SSHJump}, {"name": "ACPAO_SSH_TARGET", "value": g.config.SSHTarget}}})
+	}
+	cmd, err := newAgentCommand(config.Command, config.Args)
 	if err != nil {
 		return err
 	}
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	cmd := exec.Command(config.Command, config.Args...)
 	cmd.Dir = cwd
 	cmd.Env = []string{}
 	for _, entry := range os.Environ() {
@@ -422,15 +441,24 @@ func (g *gateway) launch(s *session, config agentConfig, restore bool) error {
 	if err = cmd.Start(); err != nil {
 		return err
 	}
-	p := &acpProcess{cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr, session: s, gateway: g, pending: make(map[string]chan rpcReply), permissions: make(map[string]chan string)}
-	g.mu.Lock()
-	g.processes[s.ID] = p
-	g.mu.Unlock()
+	p := &acpProcess{cmd: cmd, probe: probe, stdin: stdin, stdout: stdout, stderr: stderr, session: s, gateway: g, pending: make(map[string]chan rpcReply), permissions: make(map[string]chan string)}
+	if !probe {
+		g.mu.Lock()
+		g.processes[s.ID] = p
+		g.mu.Unlock()
+	} else {
+		defer p.stop()
+	}
 	go p.listen()
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			g.diagnostic("warning", "AGENT_STDERR", scanner.Text(), s.ID, config.ID)
+			message := redactAgentEnv(scanner.Text(), config.Env)
+			key := s.ID
+			if probe {
+				key = ""
+			}
+			g.diagnostic("warning", "AGENT_STDERR", message, key, config.ID)
 		}
 	}()
 	go func() {
@@ -439,6 +467,9 @@ func (g *gateway) launch(s *session, config agentConfig, restore bool) error {
 		wasClosed := p.closed
 		p.closed = true
 		p.mu.Unlock()
+		if probe {
+			return
+		}
 		g.mu.Lock()
 		if g.processes[s.ID] == p {
 			delete(g.processes, s.ID)
@@ -473,8 +504,7 @@ func (g *gateway) launch(s *session, config agentConfig, restore bool) error {
 	_ = json.Unmarshal(init.Meta["steering"], &steer)
 	s.Capabilities.Steering = steer.Supported
 	s.ProcessID = cmd.Process.Pid
-	bridge := map[string]any{"name": "acpao", "command": self, "args": []string{"--mcp-bridge"}, "env": []map[string]string{{"name": "ACPAO_CENTER", "value": g.config.Center}, {"name": "ACPAO_CENTER_CERTIFICATE", "value": g.config.CenterCertificate}, {"name": "ACPAO_TOKEN", "value": token}, {"name": "ACPAO_SSH_JUMP", "value": g.config.SSHJump}, {"name": "ACPAO_SSH_TARGET", "value": g.config.SSHTarget}}}
-	params := map[string]any{"cwd": s.Cwd, "mcpServers": []any{bridge}}
+	params := map[string]any{"cwd": s.Cwd, "mcpServers": mcp}
 	if restore {
 		if !s.Capabilities.Load {
 			p.stop()
@@ -488,11 +518,16 @@ func (g *gateway) launch(s *session, config agentConfig, restore bool) error {
 		}
 		err = p.request(ctx, "session/new", params, &response)
 		s.ACPID = response.SessionID
+		if err == nil && s.ACPID == "" {
+			err = errors.New("ACP Agent did not return a session ID")
+		}
 	}
 	if err != nil {
 		p.stop()
 		return err
 	}
-	g.updateSession(s, "idle", "")
+	if !probe {
+		g.updateSession(s, "idle", "")
+	}
 	return nil
 }

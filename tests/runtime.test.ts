@@ -262,3 +262,16 @@ test("Git worktree opt-in isolates edits while keeping the source repository int
   await writeFile(resolve(s.cwd, "baseline.txt"), "isolated\n");
   assert.equal(await readFile(resolve(c.root, "baseline.txt"), "utf8"), "original\n");
 });
+
+test("Windows launches a quoted CMD ACP wrapper", { skip: process.platform !== "win32" }, async (t) => {
+  const { writeFile } = await import("node:fs/promises");
+  const c = await setup(t);
+  const wrapper = resolve(c.root, "ACP wrapper.cmd");
+  await writeFile(wrapper, `@"${process.execPath}" "${resolve("scripts/mock-agent.mjs")}" %*\r\n`);
+  const host = c.store.host("local");
+  const agent = { id: "cmd-wrapper", name: "CMD ACP", command: wrapper.replaceAll("\\", "/"),
+    args: ["a value with spaces"], env: {} };
+  c.store.put("host", host.id, { ...host, agents: [...host.agents, agent] });
+  const session = await c.orchestration.create({ cwd: c.root, agent: agent.id }, owner);
+  assert.equal(session.status, "idle");
+});

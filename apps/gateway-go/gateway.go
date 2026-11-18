@@ -40,6 +40,7 @@ type gateway struct {
 	mu        sync.Mutex
 	socket    *websocket.Conn
 	writeMu   sync.Mutex
+	agentMu   sync.Mutex
 	processes map[string]*acpProcess
 	executing map[string]chan struct{}
 	ready     bool
@@ -208,12 +209,8 @@ func (g *gateway) connect(ctx context.Context) error {
 	g.mu.Lock()
 	g.socket = ws
 	g.mu.Unlock()
-	agents := make([]agentConfig, len(g.config.Agents))
-	copy(agents, g.config.Agents)
-	for i := range agents {
-		agents[i].Env = map[string]string{}
-	}
-	if err = g.write(map[string]any{"type": "hello", "agents": agents, "cwd": g.config.Root, "platform": runtime.GOOS}); err != nil {
+
+	if err = g.write(map[string]any{"type": "hello", "agents": g.publicAgents(), "cwd": g.config.Root, "platform": runtime.GOOS, "manageAgents": true}); err != nil {
 		return err
 	}
 	ws.SetReadLimit(4 * 1024 * 1024)
@@ -245,7 +242,15 @@ func (g *gateway) connect(ctx context.Context) error {
 			}
 			g.flush()
 		case "command":
-			go g.command(msg.ID, msg.Action, msg.Payload)
+			if strings.HasPrefix(msg.Action, "agent.") {
+				go func(id, action string, payload json.RawMessage) {
+					result, problem := g.agentCommand(action, payload)
+					response, _ := json.Marshal(result)
+					g.result(receipt{ID: id, Status: "done", Result: response, Error: problem})
+				}(msg.ID, msg.Action, msg.Payload)
+			} else {
+				go g.command(msg.ID, msg.Action, msg.Payload)
+			}
 		default:
 			return fmt.Errorf("unknown center message %q", msg.Type)
 		}
@@ -389,9 +394,9 @@ func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireErr
 			return fail("HOST_FORBIDDEN", "Invalid target host or Session")
 		}
 		var agent *agentConfig
-		for i := range g.config.Agents {
-			if g.config.Agents[i].ID == payload.Agent.ID {
-				agent = &g.config.Agents[i]
+		for _, item := range g.agents() {
+			if item.ID == payload.Agent.ID {
+				agent = &item
 				break
 			}
 		}

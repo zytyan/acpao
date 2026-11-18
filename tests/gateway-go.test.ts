@@ -66,8 +66,30 @@ test(
     ).catch(() => {
       throw new Error(stderr);
     });
+    const remoteAgent = {
+      id: "custom-go",
+      name: "Configured remotely",
+      command: process.execPath,
+      args: [resolve(project, "scripts/mock-agent.mjs")],
+      env: { MOCK_LOAD: "1", MOCK_STEERING: "1", MOCK_STDERR: "remote stderr sentinel", MOCK_TOKEN: "remote-secret-value-123" },
+    };
+    const remoteConfigUrl = `/api/hosts/${identity.host}/agent`;
+    const headers = { authorization: `Bearer ${adminToken}` };
+    const failed = await c.app.inject({
+      method: "POST", url: remoteConfigUrl, headers,
+      payload: { agent: { ...remoteAgent, command: resolve(c.root, "nonexistent-agent") } },
+    });
+    assert.equal(failed.json().ok, false);
+    assert.ok(!c.store.host(identity.host).agents.some(a => a.id === remoteAgent.id));
+    const added = await c.app.inject({ method: "POST", url: remoteConfigUrl, headers, payload: { agent: remoteAgent } });
+    assert.equal(added.json().ok, true, added.body);
+    await until(() => c.store.host(identity.host).agents.some(a => a.id === remoteAgent.id), Boolean);
+    const edit = await c.app.inject({ url: `/api/hosts/${identity.host}/agents/${remoteAgent.id}`, headers });
+    assert.deepEqual(edit.json(), remoteAgent);
+    assert.equal(c.store.db.prepare("SELECT COUNT(*) AS n FROM objects WHERE kind='dispatch' AND data LIKE ?")
+      .get("%remote-secret-value-123%")?.n, 0);
     const session = await c.orchestration.create(
-      { host: identity.host, cwd: c.root, agent: "mock", title: "Go remote" },
+      { host: identity.host, cwd: c.root, agent: remoteAgent.id, title: "Go remote" },
       owner,
     );
     await until(
@@ -193,6 +215,7 @@ test(
       throw new Error(stderr);
     });
     assert.equal(c.store.messages(session.id).filter((m) => m.role === "user").length, 4);
+    assert.ok(c.store.host(identity.host).agents.some(a => a.id === remoteAgent.id));
     const finalChild = child;
     finalChild.kill();
     await new Promise<void>((done) => finalChild.once("exit", () => done()));

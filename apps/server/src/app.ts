@@ -9,8 +9,6 @@ import { z } from "zod";
 import { resolve } from "node:path";
 import type { ServerResponse } from "node:http";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { access } from "node:fs/promises";
-import { constants } from "node:fs";
 import { Store, id, secret, hash } from "../../../packages/core/src/store.js";
 import { Runtime } from "../../../packages/core/src/runtime.js";
 import {
@@ -26,6 +24,7 @@ import {
   type Session,
 } from "../../../packages/core/src/types.js";
 import { RemoteHub } from "./remote.js";
+import { findAgentExecutable } from "../../../packages/core/src/agent-spawn.js";
 import { probeAgent } from "./probe.js";
 import { SshDeploy, sshDeploySchema } from "./ssh-deploy.js";
 export interface AppOptions {
@@ -370,9 +369,13 @@ export async function createApp(options: AppOptions = {}) {
     admin(req);
     return store.all<Host>("host").map(publicHost);
   });
-  app.get("/api/hosts/local/agents/:agent", async (req) => {
+  app.get("/api/hosts/:host/agents/:agent", async (req) => {
     admin(req);
-    const key = (req.params as { agent: string }).agent;
+    const { host, agent: key } = req.params as { host: string; agent: string };
+    if (host !== "local") {
+      secureRequest(req);
+      return AgentSchema.parse(await remote.manageAgent(host, "agent.get", { key }));
+    }
     const agent = store.host("local").agents.find((item) => item.id === key);
     if (!agent) throw new AppError("AGENT_NOT_FOUND", "Agent 配置不存在", 404);
     return agent;
@@ -388,16 +391,12 @@ export async function createApp(options: AppOptions = {}) {
         args: [],
       },
       { id: "gemini", name: "Gemini CLI", command: "gemini", args: ["--acp"] },
+      { id: "opencode", name: "OpenCode", command: "opencode", args: ["acp"] },
     ];
     const detected = [];
     for (const c of candidates) {
-      for (const dir of (process.env.PATH ?? "").split(":")) {
-        try {
-          await access(resolve(dir, c.command), constants.X_OK);
-          detected.push({ ...c, command: resolve(dir, c.command), env: {} });
-          break;
-        } catch {}
-      }
+      const command = await findAgentExecutable(c.command, root);
+      if (command) detected.push({ ...c, command, env: {} });
     }
     return {
       agents: detected,
@@ -423,10 +422,18 @@ export async function createApp(options: AppOptions = {}) {
     store.event("", "hosts", {});
     return { ok: true };
   });
-  app.post("/api/hosts/local/agent", async (req) => {
-    const p = admin(req),
-      v = z.object({ agent: AgentSchema }).parse(req.body),
-      h = store.host("local");
+  app.post("/api/hosts/:host/agent", async (req) => {
+    const p = admin(req);
+    const { host } = req.params as { host: string };
+    const v = z.object({ agent: AgentSchema }).parse(req.body);
+    if (host !== "local") {
+      secureRequest(req);
+      if (v.agent.id === "mock") throw new AppError("INVALID_AGENT", "测试 Agent 仅在中心本机可用。", 400);
+      const result = await remote.manageAgent(host, "agent.configure", v);
+      store.audit(p, "host.agent.configure", host);
+      return result;
+    }
+    const h = store.host("local");
     if (v.agent.id === "mock" && !store.get<boolean>("setting", "test-features"))
       throw new AppError("TEST_FEATURES_DISABLED", "请先在日志与诊断中开启测试功能", 403);
     const probe = await probeAgent(v.agent, root);
