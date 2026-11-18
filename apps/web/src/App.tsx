@@ -41,6 +41,10 @@ import {
   type DiagnosticData,
 } from "./api";
 import { Mark, Status, Modal, Copy, relativeTime, Conversation, AgentForm } from "./ui";
+import { version } from "../../../package.json";
+
+const gatewayRelease = `https://github.com/zytyan/acpao/releases/download/v${version}`;
+
 export default function App() {
   const [auth, setAuth] = useState<boolean | null>(null),
     [login, setLogin] = useState(""),
@@ -119,8 +123,8 @@ export default function App() {
   })();
   const pairCommand = pair
     ? pairPlatform === "windows-x64"
-      ? `Invoke-WebRequest 'https://github.com/zytyan/acpao/releases/download/v0.2.0/acpao-gateway-windows-x64.exe' -OutFile acpao-gateway.exe\n$env:ACPAO_CENTER='${pairCenterOrigin}'\n$env:ACPAO_PAIR_CODE='${pair.code}'\n$env:ACPAO_ROOT='.'\n./acpao-gateway.exe --pair\n./acpao-gateway.exe --daemon`
-      : `curl -fL 'https://github.com/zytyan/acpao/releases/download/v0.2.0/acpao-gateway-${pairPlatform}' -o acpao-gateway\nchmod +x acpao-gateway\nexport ACPAO_CENTER='${pairCenterOrigin}'\nexport ACPAO_PAIR_CODE='${pair.code}'\nexport ACPAO_ROOT='.'\n./acpao-gateway --pair\n./acpao-gateway --daemon`
+      ? `Invoke-WebRequest '${gatewayRelease}/acpao-gateway-windows-x64.exe' -OutFile acpao-gateway.exe\n$env:ACPAO_CENTER='${pairCenterOrigin}'\n$env:ACPAO_PAIR_CODE='${pair.code}'\n$env:ACPAO_ROOT='.'\n./acpao-gateway.exe --pair\n./acpao-gateway.exe --daemon`
+      : `curl -fL '${gatewayRelease}/acpao-gateway-${pairPlatform}' -o acpao-gateway\nchmod +x acpao-gateway\nexport ACPAO_CENTER='${pairCenterOrigin}'\nexport ACPAO_PAIR_CODE='${pair.code}'\nexport ACPAO_ROOT='.'\n./acpao-gateway --pair\n./acpao-gateway --daemon`
     : "";
   const refresh = useCallback(async () => {
     try {

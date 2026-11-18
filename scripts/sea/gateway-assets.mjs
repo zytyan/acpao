@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { constants, zstdCompressSync } from "node:zlib";
 
 const output = resolve("sea-build/gateways");
+const { version } = JSON.parse(await readFile("package.json", "utf8"));
 await mkdir(output, { recursive: true });
 for (const [name, GOOS, GOARCH] of [
   ["linux-x64", "linux", "amd64"],
@@ -13,7 +14,15 @@ for (const [name, GOOS, GOARCH] of [
   const binary = resolve(output, "acpao-gateway-" + name + (GOOS === "windows" ? ".exe" : ""));
   const build = spawnSync(
     "go",
-    ["build", "-buildvcs=false", "-trimpath", "-ldflags=-s -w", "-o", binary, "."],
+    [
+      "build",
+      "-buildvcs=false",
+      "-trimpath",
+      `-ldflags=-s -w -X main.gatewayVersion=${version}`,
+      "-o",
+      binary,
+      ".",
+    ],
     {
       cwd: resolve("apps/gateway-go"),
       env: { ...process.env, GOOS, GOARCH, CGO_ENABLED: "0" },

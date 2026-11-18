@@ -22,6 +22,8 @@ import (
 	"time"
 )
 
+var gatewayVersion = "dev"
+
 func main() {
 	if err := start(); err != nil {
 		slog.Error("gateway stopped", "error", err)
@@ -50,7 +52,7 @@ func start() error {
 		return pathErr
 	}
 	if *version {
-		fmt.Println("acpao-gateway 0.2")
+		fmt.Println("acpao-gateway", gatewayVersion)
 		return nil
 	}
 	if *upgrade != "" {
