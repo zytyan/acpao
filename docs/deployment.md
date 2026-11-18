@@ -66,7 +66,9 @@ Windows 上可以填写 `.cmd` 或 `.bat` 启动程序。带空格的路径和�
 
 普通主机可运行 `acpao-gateway-linux-x64 --daemon`：命令返回终端，后台 manager 监视 worker 并在退出后重启。`--stop` 结束后台 manager；`--manager` 用于前台诊断。Docker 容器内使用 `--foreground`，由容器 restart policy 管理整个进程。跳板连接可在配对时设置 `ACPAO_SSH_JUMP` 和 `ACPAO_SSH_TARGET`，Gateway 使用系统 `ssh -J` 建立本地转发，HTTPS/TLS 仍按中心原域名校验。该模式要求 SSH 密钥、已信任的主机指纹和目标机器上的 `ssh` 命令预先可用。不要把凭据写进启动参数和日志。
 
-有 manager 时，运行 `acpao-gateway-linux-x64 --upgrade /path/to/new-binary`。候选二进制会复制到受限版本目录并通过 `--version` 验证；worker 等待执行中的 Prompt 结束后退出，manager 启动新文件。不会重放不确定结果的 Prompt；Agent 若不支持 `session/load`，其历史会话仍需人工处理。
+在「主机 → Gateway 管理 → 升级 Gateway」可暂存中心随附的对应平台版本。SSH 部署的旧 Gateway 支持通过原 SSH 连接上传更新；新版受 manager 保护的 Gateway 可以通过已配对的控制通道升级。升级等活动 Prompt 完成后切换。SSH 部署的新版主机完全离线时，中心会在 SSH 可达的情况下尝试恢复守护进程。主动运行 `--stop` 会暂停自动拉起，`--daemon` 可重新开启。Docker 的 `--foreground` 模式由容器重启策略和镜像部署负责。
+
+也可以在远端运行 `acpao-gateway-linux-x64 --upgrade /path/to/new-binary`。候选二进制会复制到受限版本目录并通过 `--version` 验证；worker 等待执行中的 Prompt 结束后退出，manager 启动新文件。不会重放不确定结果的 Prompt；Agent 若不支持 `session/load`，其历史会话仍需人工处理。
 
 ## 备份与恢复
 

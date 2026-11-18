@@ -57,6 +57,9 @@ export interface Host {
   cwd: string;
   platform?: string;
   manageAgents?: boolean;
+  gatewayArch?: string;
+  gatewayVersion?: string;
+  gatewayManaged?: boolean;
   lastSeen?: number;
   error?: string;
 }

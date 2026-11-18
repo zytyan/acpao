@@ -78,6 +78,7 @@ export default function App() {
     [agentHostId, setAgentHostId] = useState("local"),
     [detected, setDetected] = useState<Agent[]>([]),
     [working, setWorking] = useState(false),
+    [upgradingHost, setUpgradingHost] = useState<string | null>(null),
     [text, setText] = useState(""),
     [slashIndex, setSlashIndex] = useState(-1),
     [dismissedSlash, setDismissedSlash] = useState<string | null>(null),
@@ -1149,6 +1150,7 @@ export default function App() {
                           : h.status === "revoked"
                             ? "访问已撤销"
                             : "未连接"}
+                        {h.gatewayVersion && <span>· Gateway {h.gatewayVersion}</span>}
                       </p>
                     </div>
                     <i className={`host-dot ${h.status}`} />
@@ -1190,10 +1192,28 @@ export default function App() {
                       {h.kind === "remote" && h.status !== "revoked" && (
                         <details className="host-options">
                           <summary className="subtle-button">
-                            身份管理
+                            Gateway 管理
                             <ChevronDown size={14} />
                           </summary>
                           <div>
+                            <button
+                              className="button"
+                              disabled={!h.gatewayUpgrade || upgradingHost !== null}
+                              onClick={() => {
+                                setUpgradingHost(h.id);
+                                void api(`/hosts/${h.id}/upgrade`, {})
+                                  .then(() => {
+                                    setToast("更新已暂存，Gateway 会等当前执行结束后重新连接。");
+                                    return refresh();
+                                  })
+                                  .catch(report)
+                                  .finally(() => setUpgradingHost(null));
+                              }}
+                            >
+                              {upgradingHost === h.id ? <LoaderCircle size={14} className="spin" /> : <Download size={14} />}
+                              {upgradingHost === h.id ? "正在暂存更新…" : "升级 Gateway"}
+                            </button>
+                            {!h.gatewayUpgrade && <p>手动安装的旧版或容器 Gateway 请通过原部署方式升级。</p>}
                             <p>
                               轮换会立即使旧凭据失效。恢复文件只包含设备身份，不能恢复数据库或 Agent
                               本地会话。

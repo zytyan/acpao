@@ -16,6 +16,8 @@ export interface Host {
   cwd: string;
   platform?: string;
   manageAgents?: boolean;
+  gatewayVersion?: string;
+  gatewayUpgrade?: boolean;
   error?: string;
 }
 export interface Session {

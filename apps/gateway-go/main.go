@@ -38,6 +38,7 @@ func start() error {
 	pair := flag.Bool("pair", false, "pair device with center")
 	provision := flag.Bool("provision", false, "initialize a new device config from standard input over SSH")
 	foreground := flag.Bool("foreground", false, "run worker in foreground (Docker)")
+	ensure := flag.Bool("ensure", false, "start the daemon if its manager is not running")
 	daemon := flag.Bool("daemon", false, "detach a manager which restarts the worker")
 	manager := flag.Bool("manager", false, "run manager in foreground")
 	stopManagerFlag := flag.Bool("stop", false, "stop the detached manager")
@@ -73,7 +74,15 @@ func start() error {
 	if *exportIdentity != "" {
 		return transferIdentity(path, *exportIdentity, true)
 	}
-	if *daemon && !(*foreground || *worker || *manager) {
+	if (*daemon || *ensure) && !(*foreground || *worker || *manager) {
+		latch := filepath.Join(filepath.Dir(path), "manual-stop")
+		if *ensure {
+			if _, err := os.Stat(latch); err == nil {
+				return nil
+			}
+		} else if err := os.Remove(latch); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		return spawnManager(path)
 	}
 	if *manager {
@@ -94,12 +103,24 @@ func start() error {
 	if err != nil {
 		return err
 	}
+	if err := checkStateDirectory(filepath.Dir(path)); err != nil {
+		return err
+	}
+	workerLock, err := acquireLock(path, "worker.lock")
+	if err != nil {
+		return err
+	}
+	if workerLock == nil {
+		return errors.New("Gateway worker already running")
+	}
+	defer workerLock.Close()
 	s, err := openStore(filepath.Join(filepath.Dir(path), "gateway-go.sqlite"))
 	if err != nil {
 		return err
 	}
 	defer s.db.Close()
 	g := newGateway(c, s)
+	g.configPath, g.managed = path, *worker
 	g.recoverSessions()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -288,7 +309,25 @@ func transferIdentity(configFile, identityFile string, export bool) error {
 	}
 	return os.Rename(temp, configFile)
 }
+func acquireLock(path, name string) (*os.File, error) {
+	f, err := os.OpenFile(filepath.Join(filepath.Dir(path), name), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	ok, err := tryProcessLock(f)
+	if !ok || err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
 func supervise(path string) error {
+	lock, err := acquireLock(path, "manager.lock")
+	if err != nil || lock == nil {
+		return err
+	}
+	defer lock.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	pidFile := filepath.Join(filepath.Dir(path), "manager.pid")
@@ -322,6 +361,16 @@ func spawnManager(path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return err
 	}
+	lock, err := acquireLock(path, "manager.lock")
+	if err != nil || lock == nil {
+		return err
+	}
+	data, _ := os.ReadFile(filepath.Join(filepath.Dir(path), "manager.pid"))
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	_ = lock.Close()
+	if pid > 0 && legacyManagerRunning(pid, path) {
+		return nil
+	}
 	self, err := os.Executable()
 	if err != nil {
 		return err
@@ -335,6 +384,14 @@ func spawnManager(path string) error {
 	return cmd.Process.Release()
 }
 func stopManager(path string) error {
+	if err := checkStateDirectory(filepath.Dir(path)); err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err == nil {
+		if err := os.WriteFile(filepath.Join(filepath.Dir(path), "manual-stop"), nil, 0600); err != nil {
+			return err
+		}
+	}
 	pidFile := filepath.Join(filepath.Dir(path), "manager.pid")
 	data, err := os.ReadFile(pidFile)
 	if errors.Is(err, os.ErrNotExist) {
@@ -387,11 +444,27 @@ func stageUpgrade(path, candidate string) error {
 		return err
 	}
 	target := filepath.Join(directory, "gateway-"+hex.EncodeToString(sum[:12])+suffix)
-	if err = os.WriteFile(target, source, 0700); err != nil {
-		return err
-	}
-	if err = os.Chmod(target, 0700); err != nil {
-		return err
+	existing, readErr := os.ReadFile(target)
+	if readErr != nil || sha256.Sum256(existing) != sum {
+		temp, err := os.CreateTemp(directory, "gateway-stage-*"+suffix)
+		if err != nil {
+			return err
+		}
+		defer os.Remove(temp.Name())
+		_, err = temp.Write(source)
+		closeErr := temp.Close()
+		if err != nil {
+			return err
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if err = os.Chmod(temp.Name(), 0700); err != nil {
+			return err
+		}
+		if err = os.Rename(temp.Name(), target); err != nil {
+			return err
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

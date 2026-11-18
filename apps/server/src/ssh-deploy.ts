@@ -37,7 +37,11 @@ export const sshDeploySchema = z.object({
   root: z.string().trim().max(1024).optional(),
   password: z.string().min(1).max(1024).optional(),
 });
-type Tunnel = SshTarget & { host: string; portAtGateway: number; sealedPassword?: SealedPassword };
+type Tunnel = SshTarget & {
+  host: string; portAtGateway: number; sealedPassword?: SealedPassword;
+  platform?: GatewayPlatform;
+  recoverable?: "original" | "updated";
+};
 type RunCommand = (command: string, stage: string, input?: Buffer | string) => Promise<string>;
 
 function sshArgs(target: SshTarget, forward?: string) {
@@ -157,6 +161,20 @@ function gatewayCommands(host: string, platform: GatewayPlatform) {
         Move-Item -LiteralPath $temp -Destination (Join-Path $d 'acpao-gateway.exe');
       `,
       ),
+      uploadUpdate: powerShell(directory + `
+        $temp=Join-Path $d 'gateway-update.tmp'; $file=[IO.File]::Create($temp);
+        try { [Console]::OpenStandardInput().CopyTo($file) } finally { $file.Dispose() }
+        Move-Item -Force -LiteralPath $temp -Destination (Join-Path $d 'gateway-update.exe');
+      `),
+      upgrade: powerShell(directory + `
+        $binary=Join-Path $d 'gateway-update.exe'; $config=Join-Path $d 'state\\config.json';
+        & $binary --config $config --upgrade $binary;
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $binary --config $config --ensure;
+        exit $LASTEXITCODE;
+      `),
+      ensure: (updated: boolean) => powerShell(directory +
+        `& (Join-Path $d '${updated ? "gateway-update.exe" : "acpao-gateway.exe"}') --ensure --config (Join-Path $d 'state\\config.json'); exit $LASTEXITCODE;`),
       provision: powerShell(
         directory +
           `
@@ -174,6 +192,9 @@ function gatewayCommands(host: string, platform: GatewayPlatform) {
     upload: script(
       'mkdir -p "$d" && cat > "$d/gateway.tmp" && chmod 700 "$d/gateway.tmp" && mv "$d/gateway.tmp" "$d/acpao-gateway"',
     ),
+    uploadUpdate: script('cat > "$d/gateway-update.tmp" && chmod 700 "$d/gateway-update.tmp" && mv "$d/gateway-update.tmp" "$d/gateway-update"'),
+    upgrade: script('"$d/gateway-update" --config "$d/state/config.json" --upgrade "$d/gateway-update" && "$d/gateway-update" --config "$d/state/config.json" --ensure'),
+    ensure: (updated: boolean) => script(`"$d/${updated ? "gateway-update" : "acpao-gateway"}" --ensure --config "$d/state/config.json"`),
     provision: script(
       '"$d/acpao-gateway" --provision --config "$d/state/config.json" && "$d/acpao-gateway" --daemon --config "$d/state/config.json"',
     ),
@@ -187,6 +208,8 @@ export class SshDeploy {
   private readonly proxySockets = new Set<Socket>();
   private readonly passwords: SshPasswordVault;
   private stopped = false;
+  private repairTimer?: NodeJS.Timeout;
+  private readonly maintenance = new Set<string>();
 
   constructor(
     private readonly store: Store,
@@ -197,7 +220,64 @@ export class SshDeploy {
     this.passwords = new SshPasswordVault(data);
   }
 
+  canManage(host: string) {
+    return !!this.store.get<Tunnel>("ssh-tunnel", host);
+  }
+
+  private async commandRunner(tunnel: Tunnel): Promise<RunCommand> {
+    if (!tunnel.sealedPassword)
+      return (command, stage, stdin) => runSSH(tunnel, command, stage, stdin);
+    const password = await this.passwords.open(tunnel.host, tunnel.sealedPassword);
+    const destination = await resolvePasswordTarget(tunnel);
+    return (command, stage, stdin) => execWithPassword(destination, password, command, stage, stdin);
+  }
+
+  private repairOffline() {
+    if (this.stopped) return;
+    for (const tunnel of this.store.all<Tunnel>("ssh-tunnel")) {
+      const { host, recoverable, platform } = tunnel;
+      if (!recoverable || !platform || this.maintenance.has(host) ||
+          this.store.get<Host>("host", host)?.status !== "offline") continue;
+      this.maintenance.add(host);
+      void this.commandRunner(tunnel)
+        .then(run => {
+          if (this.stopped || this.store.get<Host>("host", host)?.status !== "offline") return;
+          return run(gatewayCommands(host, platform).ensure(recoverable === "updated"), "恢复 Gateway");
+        })
+        .catch((error: unknown) => {
+          if (this.stopped) return;
+          const current = this.store.get<Host>("host", host);
+          const message = error instanceof AppError ? error.message : "无法通过 SSH 恢复 Gateway";
+          if (current?.status !== "offline" || current.error === message) return;
+          this.store.put("host", host, { ...current, error: message });
+          this.store.event("", "hosts", {});
+        })
+        .finally(() => this.maintenance.delete(host));
+    }
+  }
+
+  async upgrade(host: string) {
+    const tunnel = this.store.get<Tunnel>("ssh-tunnel", host);
+    if (!tunnel) throw new AppError("GATEWAY_UPGRADE_UNAVAILABLE", "此主机未通过 SSH 部署", 409);
+    if (this.maintenance.has(host)) throw new AppError("GATEWAY_MAINTENANCE", "Gateway 正在恢复或升级，请稍后重试", 409);
+    this.maintenance.add(host);
+    try {
+      const run = await this.commandRunner(tunnel);
+      const platform = tunnel.platform ?? await platformFor(run);
+      const commands = gatewayCommands(host, platform);
+      await run(commands.uploadUpdate, "上传 Gateway 更新", await gatewayBinary(platform, this.project));
+      await run(commands.upgrade, "暂存 Gateway 更新");
+      const current = this.store.get<Tunnel>("ssh-tunnel", host);
+      if (current) this.store.put("ssh-tunnel", host, { ...current, platform, recoverable: "updated" });
+      return { status: "staged" };
+    } finally {
+      this.maintenance.delete(host);
+    }
+  }
+
   restore() {
+    this.repairTimer = setInterval(() => this.repairOffline(), 12000);
+    this.repairTimer.unref();
     for (const tunnel of this.store.all<Tunnel>("ssh-tunnel")) {
       const host = this.store.get<Host>("host", tunnel.host);
       if (host && host.status !== "revoked") this.start(tunnel);
@@ -243,7 +323,9 @@ export class SshDeploy {
         : undefined;
       const path = req.url ?? "";
       const deviceTokenRequest =
-        role === "device" && req.method === "POST" && path === "/api/gateway/session-token";
+        role === "device" &&
+        ((req.method === "POST" && path === "/api/gateway/session-token") ||
+         (req.method === "GET" && path === "/api/gateway/update"));
       const agentToolRequest =
         role === "agent" &&
         ((req.method === "GET" && path === "/api/tool-schema") ||
@@ -382,6 +464,7 @@ export class SshDeploy {
 
   close() {
     this.stopped = true;
+    if (this.repairTimer) clearInterval(this.repairTimer);
     for (const tunnel of this.tunnels.values()) tunnel.abort();
     for (const socket of this.proxySockets) socket.destroy();
     if (this.proxy) this.proxy.close();
@@ -405,6 +488,7 @@ export class SshDeploy {
     const tunnel: Tunnel = {
       ...ssh,
       host,
+      platform,
       portAtGateway: randomInt(20000, 60000),
       ...(password !== undefined
         ? { sealedPassword: await this.passwords.seal(host, password) }
@@ -447,9 +531,11 @@ export class SshDeploy {
       this.store.audit(actor, "host.ssh.failed", host);
       throw error;
     }
+    const current = this.store.get<Tunnel>("ssh-tunnel", host);
+    if (current) this.store.put("ssh-tunnel", host, { ...current, recoverable: "original" });
     this.store.event("", "hosts", {});
     // Preserve the installation if connectivity needs attention so its durable tunnel keeps retrying.
-    for (let attempt = 0; attempt < 80 && !this.stopped; attempt++) {
+    for (let attempt = 0; attempt < 16 && !this.stopped; attempt++) {
       if (this.store.get<Host>("host", host)?.status === "online")
         return { host, platform, online: true };
       await delay(250);

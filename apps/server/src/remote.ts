@@ -19,6 +19,9 @@ const Hello = z.object({
   cwd: z.string().max(4096),
   platform: z.string().max(100),
   manageAgents: z.boolean().optional(),
+  arch: z.string().max(30).optional(),
+  version: z.string().max(100).optional(),
+  managed: z.boolean().optional(),
 });
 const EventSchema = z.object({
   seq: z.number().int().positive(),
@@ -98,6 +101,9 @@ export class RemoteHub {
             cwd: h.cwd,
             platform: h.platform,
             manageAgents: h.manageAgents,
+            gatewayArch: h.arch,
+            gatewayVersion: h.version,
+            gatewayManaged: h.managed,
             lastSeen: Date.now(),
           });
           ws.send(
@@ -328,7 +334,7 @@ export class RemoteHub {
             504,
           ),
         );
-      }, 30000);
+      }, action === "gateway.upgrade" ? 110000 : 30000);
       this.waiting.set(key, { resolve, reject, timer });
       ws.send(JSON.stringify({ type: "command", id: key, action, payload }));
     });

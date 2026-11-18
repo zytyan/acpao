@@ -35,18 +35,23 @@ type config struct {
 	SSHTarget         string        `json:"sshTarget,omitempty"`
 }
 type gateway struct {
-	config    config
-	store     *store
-	mu        sync.Mutex
-	socket    *websocket.Conn
-	writeMu   sync.Mutex
-	agentMu   sync.Mutex
-	processes map[string]*acpProcess
-	executing map[string]chan struct{}
-	ready     bool
-	cursor    int64
-	stopped   bool
-	draining  bool
+	upgradeMu  sync.Mutex
+	configPath string
+	managed    bool
+	config     config
+	store      *store
+	mu         sync.Mutex
+	socket     *websocket.Conn
+	writeMu    sync.Mutex
+	agentMu    sync.Mutex
+	processes  map[string]*acpProcess
+	executing  map[string]chan struct{}
+	ready      bool
+	cursor     int64
+	inFlight   int64
+	flushWake  chan struct{}
+	stopped    bool
+	draining   bool
 }
 
 var bearerSecret = regexp.MustCompile(`(?i)Bearer\s+\S+`)
@@ -75,14 +80,14 @@ func (g *gateway) diagnostic(level, code, message, session, agent string) {
 }
 
 func newGateway(c config, s *store) *gateway {
-	return &gateway{config: c, store: s, processes: make(map[string]*acpProcess), executing: make(map[string]chan struct{})}
+	return &gateway{config: c, store: s, processes: make(map[string]*acpProcess), executing: make(map[string]chan struct{}), flushWake: make(chan struct{}, 1)}
 }
 func (g *gateway) emit(session, kind string, data any) {
 	if err := g.store.event(session, kind, data); err != nil {
 		slog.Error("journal write failed", "error", err)
 		return
 	}
-	go g.flush()
+	g.scheduleFlush()
 }
 func (g *gateway) updateSession(s *session, status, problem string) {
 	g.mu.Lock()
@@ -108,28 +113,56 @@ func (g *gateway) write(v any) error {
 	if ws == nil {
 		return errors.New("offline")
 	}
+	return g.writeSocket(ws, v)
+}
+func (g *gateway) writeSocket(ws *websocket.Conn, value any) error {
 	g.writeMu.Lock()
 	defer g.writeMu.Unlock()
 	_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return ws.WriteJSON(v)
+	return ws.WriteJSON(value)
+}
+func (g *gateway) scheduleFlush() {
+	select {
+	case g.flushWake <- struct{}{}:
+	default:
+	}
 }
 func (g *gateway) flush() {
 	g.mu.Lock()
-	ready := g.ready
-	cursor := g.cursor
+	ws, cursor := g.socket, g.cursor
+	ready := g.ready && g.inFlight == 0
 	g.mu.Unlock()
-	if !ready {
+	if !ready || ws == nil {
 		return
 	}
 	events, err := g.store.events(cursor, 30)
 	if err != nil || len(events) == 0 {
 		return
 	}
-	if err = g.write(map[string]any{"type": "events", "events": events}); err != nil {
+	g.mu.Lock()
+	if ws != g.socket || !g.ready || cursor != g.cursor {
+		g.mu.Unlock()
+		g.scheduleFlush()
+		return
+	}
+	g.inFlight = events[len(events)-1].Seq
+	g.mu.Unlock()
+	if err = g.writeSocket(ws, map[string]any{"type": "events", "events": events}); err != nil {
 		slog.Warn("event sync failed", "error", err)
+		_ = ws.Close()
 	}
 }
 func (g *gateway) run(ctx context.Context) error {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-g.flushWake:
+				g.flush()
+			}
+		}
+	}()
 	go func() {
 		<-ctx.Done()
 		g.mu.Lock()
@@ -139,7 +172,7 @@ func (g *gateway) run(ctx context.Context) error {
 			_ = socket.Close()
 		}
 	}()
-	backoff := time.Second
+	backoff := 250 * time.Millisecond
 	for ctx.Err() == nil {
 		g.mu.Lock()
 		draining := g.draining
@@ -154,7 +187,11 @@ func (g *gateway) run(ctx context.Context) error {
 			g.diagnostic("warning", "CENTER_DISCONNECTED", err.Error(), "", "")
 		}
 		g.mu.Lock()
+		if g.ready {
+			backoff = 250 * time.Millisecond
+		}
 		g.ready = false
+		g.inFlight = 0
 		g.socket = nil
 		g.mu.Unlock()
 		select {
@@ -162,7 +199,7 @@ func (g *gateway) run(ctx context.Context) error {
 			return nil
 		case <-time.After(backoff):
 		}
-		if backoff < 30*time.Second {
+		if backoff < 8*time.Second {
 			backoff *= 2
 		}
 	}
@@ -210,7 +247,7 @@ func (g *gateway) connect(ctx context.Context) error {
 	g.socket = ws
 	g.mu.Unlock()
 
-	if err = g.write(map[string]any{"type": "hello", "agents": g.publicAgents(), "cwd": g.config.Root, "platform": runtime.GOOS, "manageAgents": true}); err != nil {
+	if err = g.write(map[string]any{"type": "hello", "agents": g.publicAgents(), "cwd": g.config.Root, "platform": runtime.GOOS, "arch": runtime.GOARCH, "version": gatewayVersion, "managed": g.managed, "manageAgents": true}); err != nil {
 		return err
 	}
 	ws.SetReadLimit(4 * 1024 * 1024)
@@ -235,12 +272,15 @@ func (g *gateway) connect(ctx context.Context) error {
 			}
 			g.mu.Lock()
 			g.cursor = msg.Cursor
+			if msg.Type == "sync" || g.inFlight <= msg.Cursor {
+				g.inFlight = 0
+			}
 			g.ready = true
 			g.mu.Unlock()
 			if msg.Type == "ack" {
 				_ = g.store.ack(msg.Cursor)
 			}
-			g.flush()
+			g.scheduleFlush()
 		case "command":
 			if strings.HasPrefix(msg.Action, "agent.") {
 				go func(id, action string, payload json.RawMessage) {
@@ -304,11 +344,11 @@ func (g *gateway) command(id, action string, payload json.RawMessage) {
 		r.Result, _ = json.Marshal(result)
 	}
 	_ = g.store.saveReceipt(r)
+	g.result(r)
 	g.store.mu.Lock()
 	delete(g.executing, id)
 	close(done)
 	g.store.mu.Unlock()
-	g.result(r)
 }
 func (g *gateway) watchUpgrade(ctx context.Context, cancel context.CancelFunc, path string) {
 	self, _ := os.Executable()
@@ -325,11 +365,7 @@ func (g *gateway) watchUpgrade(ctx context.Context, cancel context.CancelFunc, p
 			}
 			g.mu.Lock()
 			g.draining = true
-			socket := g.socket
 			g.mu.Unlock()
-			if socket != nil {
-				_ = socket.Close()
-			}
 			for ctx.Err() == nil {
 				g.store.mu.Lock()
 				busy := len(g.executing) > 0
@@ -361,6 +397,19 @@ func (g *gateway) result(r receipt) {
 }
 func fail(code, msg string) (any, *wireError) { return nil, &wireError{Code: code, Message: msg} }
 func (g *gateway) execute(id, action string, raw json.RawMessage) (any, *wireError) {
+	if action == "gateway.upgrade" {
+		if !g.upgradeMu.TryLock() {
+			return fail("GATEWAY_UPGRADE_BUSY", "Gateway 正在暂存更新")
+		}
+		defer g.upgradeMu.Unlock()
+		if !g.managed {
+			return fail("GATEWAY_NO_MANAGER", "请通过部署脚本或容器编排器升级此 Gateway")
+		}
+		if err := g.downloadUpgrade(); err != nil {
+			return fail("GATEWAY_UPGRADE_FAILED", err.Error())
+		}
+		return map[string]string{"status": "staged"}, nil
+	}
 	var payload struct {
 		Session  json.RawMessage `json:"session"`
 		Agent    agentConfig     `json:"agent"`

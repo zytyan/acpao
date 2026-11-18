@@ -27,6 +27,7 @@ import { RemoteHub } from "./remote.js";
 import { findAgentExecutable } from "../../../packages/core/src/agent-spawn.js";
 import type { SlashCommand } from "../../../packages/core/src/slash-commands.js";
 import { probeAgent } from "./probe.js";
+import { gatewayBinary, type GatewayPlatform } from "./gateway-assets.js";
 import { SshDeploy, sshDeploySchema } from "./ssh-deploy.js";
 export interface AppOptions {
   dataDir?: string;
@@ -44,11 +45,11 @@ export interface AppOptions {
 }
 const descriptions: Record<ToolName, string> = {
   delegate:
-    "将一件工作异步交给 Agent，返回独立会话。默认同一主机与目录；可选择 Git worktree 隔离。",
+    "将一件工作异步交给 Agent，返回独立会话。可用 hosts 发现其他在线主机；跨主机时默认采用目标主机工作目录。",
   send: "给会话发送指令；明确返回立即或排队。不支持 Steering 时返回错误，不静默降级。",
   wait: "用一个游标等待多个会话的进展或终态，最长 30 秒；摘要仅截取 Agent 实际输出。",
   sessions: "列出、查看、读取历史、创建、取消、关闭或按实际能力恢复会话。",
-  hosts: "查询授权范围内的主机、可用 Agent 和能力。",
+  hosts: "发现在线主机与可用 Agent，用于选择委派目标。",
 };
 export async function createApp(options: AppOptions = {}) {
   const streams = new Set<ServerResponse>();
@@ -368,7 +369,11 @@ export async function createApp(options: AppOptions = {}) {
   });
   app.get("/api/hosts", async (req) => {
     admin(req);
-    return store.all<Host>("host").map(publicHost);
+    return store.all<Host>("host").map(h => ({
+      ...publicHost(h),
+      gatewayUpgrade: h.kind === "remote" && h.status !== "revoked" &&
+        (sshDeploy.canManage(h.id) || (h.status === "online" && !!h.gatewayManaged)),
+    }));
   });
   app.get("/api/hosts/:host/agents/:agent", async (req) => {
     admin(req);
@@ -520,6 +525,29 @@ export async function createApp(options: AppOptions = {}) {
       return { host: pair.host, token: device };
     },
   );
+  app.post("/api/hosts/:host/upgrade", async (req) => {
+    const actor = admin(req);
+    secureRequest(req);
+    const h = store.host((req.params as { host: string }).host);
+    if (h.kind !== "remote" || h.status === "revoked")
+      throw new AppError("INVALID_HOST", "请选择有效远程主机");
+    store.audit(actor, "host.gateway.upgrade", h.id);
+    if (h.status === "online" && h.gatewayManaged) return remote.call(h.id, "gateway.upgrade", {});
+    return sshDeploy.upgrade(h.id);
+  });
+  app.get("/api/gateway/update", async (req, reply) => {
+    const p = principal(req);
+    if (p.kind !== "device" || !p.host)
+      throw new AppError("FORBIDDEN", "仅限已配对 Gateway 下载更新", 403);
+    const host = store.host(p.host);
+    if (host.status === "revoked" || host.status !== "online" || !host.gatewayManaged ||
+        !host.gatewayArch || !host.platform)
+      throw new AppError("GATEWAY_UPDATE_UNAVAILABLE", "Gateway 未准备好更新", 409);
+    const platform = `${host.platform}-${host.gatewayArch === "amd64" ? "x64" : host.gatewayArch}`;
+    if (!["linux-x64", "linux-arm64", "windows-x64"].includes(platform))
+      throw new AppError("GATEWAY_PLATFORM_UNSUPPORTED", "该 Gateway 平台不支持更新", 422);
+    return reply.type("application/octet-stream").send(await gatewayBinary(platform as GatewayPlatform, project));
+  });
   app.post("/api/gateway/session-token", async (req) => {
     const p = principal(req);
     if (p.kind !== "device") throw new AppError("FORBIDDEN", "仅限设备身份", 403);
