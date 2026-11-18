@@ -6,9 +6,22 @@
 
 GitHub Release 提供 Windows x64、Linux x64、Linux ARM64 的中心程序、图形启动器和独立 Go Gateway 可执行文件。下载对应平台文件后直接运行，无需安装 Node.js 或 npm；同一平台的中心程序与 `acpao-open-*` 放在同一目录。Windows 双击 `acpao-open-windows-x64.exe` 会在后台启动工作区，不留下黑色控制台；需要只打印授权 URL、排查启动错误或指定 `--no-browser` 时运行 `acpao-windows-x64.exe` 命令行程序。中心程序首次运行会在当前目录的 `.data/runtime` 解出内置 Web 资源和服务代码，因此工作目录需要可写。Linux 先执行 `chmod +x acpao-linux-* acpao-gateway-linux-* acpao-open-linux-*`。有桌面浏览器时会自动打开并登录；否则命令行程序只显示一个可复制的授权链接。链接 30 分钟内可使用一次，登录后令牌从地址栏移除，身份保存在 HttpOnly Cookie。本机登录保持有效，直到主动登出、清除浏览器数据或更换管理员密钥；远程登录有效期 30 天。默认工作目录为启动程序时的当前目录，需要指定其他目录时可设置 `ACPAO_ROOT`。远程设备使用 `acpao-gateway-*`；真实 ACP Agent 及其登录凭据仍需在目标主机另行安装。
 
-从源码运行或开发时：
+### Windows 从源码启动
 
-需要 **Node.js 24+**、npm 和 Linux/macOS。首次安装：
+安装 **Node.js 24+**（含 npm），双击仓库根目录的 `start.bat`。之后 `git pull --ff-only`，关掉旧启动窗口，再双击即可使用新代码。脚本首次运行或依赖锁文件变化时安装依赖，每次重建网页并直接启动 TypeScript 中心，沿用仓库里的 `.data`。在终端运行 `start.bat --no-browser` 可打印授权链接。
+
+测试 SSH 推送或升级 Gateway 时，先安装 Go（版本见 [go.mod](apps/gateway-go/go.mod)），然后在 CMD 中执行：
+
+```bat
+set "ACPAO_BUILD_GATEWAYS=1"
+start.bat
+```
+
+这会额外构建三个目标平台的 Gateway 文件。常规启动可使用此前生成的 Gateway 文件。
+
+### Linux / macOS 从源码启动
+
+需要 **Node.js 24+** 和 npm。首次安装：
 
 ```bash
 npm ci

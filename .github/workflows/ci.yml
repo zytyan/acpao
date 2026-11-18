@@ -31,6 +31,35 @@ jobs:
           go-version-file: apps/gateway-go/go.mod
           cache-dependency-path: apps/gateway-go/go.sum
       - run: npm ci
+      - name: Smoke test Windows source launcher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PORT = '0'
+          $env:ACPAO_DATA_DIR = Join-Path $env:RUNNER_TEMP 'acpao-source-data'
+          $stdout = Join-Path $env:RUNNER_TEMP 'acpao-source-stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'acpao-source-stderr.log'
+          $launcher = Start-Process $env:ComSpec -ArgumentList '/d /c start.bat --no-browser' `
+            -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $deadline = (Get-Date).AddMinutes(2)
+            do {
+              $output = Get-Content $stdout -Raw
+              if ($output -match '(?m)^http://127\.0\.0\.1:(\d+)/#launch=[A-Za-z0-9_-]+\s*$') {
+                $page = Invoke-WebRequest "http://127.0.0.1:$($Matches[1])/" -TimeoutSec 10
+                if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'id="root"') {
+                  throw 'Source launcher did not serve the built web UI.'
+                }
+                return
+              }
+              if ($launcher.HasExited) { break }
+              Start-Sleep -Milliseconds 250
+            } while ((Get-Date) -lt $deadline)
+            Get-Content $stderr
+            throw 'Source launcher did not print an authorized URL.'
+          } finally {
+            if (!$launcher.HasExited) { taskkill /PID $launcher.Id /T /F | Out-Null }
+          }
       - name: Build Go Gateway
         shell: bash
         working-directory: apps/gateway-go
