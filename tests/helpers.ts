@@ -21,7 +21,7 @@ export async function setup(t: TestContext, options: AppOptions = {}) {
   t.after(async () => {
     await context.app.close();
     await new Promise((r) => setTimeout(r, 80));
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   return { ...context, root, url };
 }

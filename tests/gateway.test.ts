@@ -6,6 +6,8 @@ import { Store } from "../packages/core/src/store.js";
 import { setup, until, owner, project, adminToken } from "./helpers.js";
 import type { Host, Command } from "../packages/core/src/types.js";
 test("Gateway pairing, offline execution, event replay, deduplication and restart reconciliation", async (t) => {
+  let cleanupGateway: (() => Promise<void>) | undefined;
+  t.after(() => cleanupGateway?.());
   const c = await setup(t);
   const pairing = await c.app.inject({
     method: "POST",
@@ -46,11 +48,14 @@ test("Gateway pairing, offline execution, event replay, deduplication and restar
     ],
   };
   let gateway = new Gateway(db, options, project);
+  cleanupGateway = async () => {
+    try {
+      await gateway.stop();
+    } finally {
+      db.close();
+    }
+  };
   gateway.start();
-  t.after(async () => {
-    await gateway.stop();
-    db.close();
-  });
   await until(
     () => c.store.host(identity.host),
     (h) => h.status === "online",
