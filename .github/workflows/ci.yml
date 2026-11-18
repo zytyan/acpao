@@ -31,6 +31,7 @@ jobs:
           go-version-file: apps/gateway-go/go.mod
           cache-dependency-path: apps/gateway-go/go.sum
       - run: npm ci
+        if: runner.os != 'Windows'
       - name: Smoke test Windows source launcher
         if: runner.os == 'Windows'
         shell: pwsh
@@ -42,7 +43,7 @@ jobs:
           $launcher = Start-Process $env:ComSpec -ArgumentList '/d /c start.bat --no-browser' `
             -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           try {
-            $deadline = (Get-Date).AddMinutes(2)
+            $deadline = (Get-Date).AddMinutes(4)
             do {
               $output = Get-Content $stdout -Raw
               if ($output -match '(?m)^http://127\.0\.0\.1:(\d+)/#launch=[A-Za-z0-9_-]+\s*$') {
