@@ -34,6 +34,7 @@ func start() error {
 	}
 	file := flag.String("config", os.Getenv("ACPAO_GATEWAY_CONFIG"), "Gateway configuration path")
 	pair := flag.Bool("pair", false, "pair device with center")
+	provision := flag.Bool("provision", false, "initialize a new device config from standard input over SSH")
 	foreground := flag.Bool("foreground", false, "run worker in foreground (Docker)")
 	daemon := flag.Bool("daemon", false, "detach a manager which restarts the worker")
 	manager := flag.Bool("manager", false, "run manager in foreground")
@@ -60,6 +61,9 @@ func start() error {
 	}
 	if *pair {
 		return pairDevice(path)
+	}
+	if *provision {
+		return provisionDevice(path)
 	}
 	if *importIdentity != "" {
 		return transferIdentity(path, *importIdentity, false)
@@ -109,6 +113,59 @@ func start() error {
 	}())
 	return g.run(ctx)
 }
+func provisionDevice(path string) error {
+	var c config
+	if err := json.NewDecoder(io.LimitReader(os.Stdin, 256*1024)).Decode(&c); err != nil {
+		return errors.New("invalid Gateway provisioning data")
+	}
+	if c.Root == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		c.Root = home
+	}
+	if !filepath.IsAbs(c.Root) {
+		return errors.New("Gateway work root must be an absolute path")
+	}
+	info, err := os.Stat(c.Root)
+	if err != nil || !info.IsDir() {
+		return errors.New("Gateway work root is not an accessible directory")
+	}
+	if err := validateConfig(c); err != nil {
+		return err
+	}
+	c.Agents = []agentConfig{}
+	for _, candidate := range []agentConfig{
+		{ID: "codex", Name: "Codex ACP", Command: "codex-acp"},
+		{ID: "opencode", Name: "OpenCode", Command: "opencode", Args: []string{"acp"}},
+	} {
+		if executable, err := exec.LookPath(candidate.Command); err == nil {
+			candidate.Command = executable
+			c.Agents = append(c.Agents, candidate)
+		}
+	}
+	if err := secureStateDirectory(filepath.Dir(path)); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	err = json.NewEncoder(file).Encode(c)
+	closeErr := file.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = secureStateFile(path)
+	}
+	if err != nil {
+		_ = os.Remove(path)
+	}
+	return err
+}
+
 func pairDevice(path string) error {
 	if _, err := os.Stat(path); err == nil {
 		return errors.New("device config already exists")
@@ -268,9 +325,6 @@ func spawnManager(path string) error {
 		return err
 	}
 	cmd := exec.Command(self, "--manager", "--config", path)
-	cmd.Dir = filepath.Dir(path)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
 	detachManager(cmd)
 	if err = cmd.Start(); err != nil {
 		return err

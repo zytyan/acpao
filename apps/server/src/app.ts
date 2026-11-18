@@ -27,6 +27,7 @@ import {
 } from "../../../packages/core/src/types.js";
 import { RemoteHub } from "./remote.js";
 import { probeAgent } from "./probe.js";
+import { SshDeploy, sshDeploySchema } from "./ssh-deploy.js";
 export interface AppOptions {
   dataDir?: string;
   root?: string;
@@ -120,6 +121,8 @@ export async function createApp(options: AppOptions = {}) {
     store.put("host", "local", { ...h, status: "online", cwd: root });
   }
   const remote = new RemoteHub(store, app.server);
+  const sshDeploy = new SshDeploy(store, app.server, project);
+  app.addHook("onListen", async () => { sshDeploy.restore(); });
   const agentToken = (s: Session) => {
     store.revoke("agent", s.id);
     const t = secret();
@@ -452,6 +455,11 @@ export async function createApp(options: AppOptions = {}) {
     store.event("", "hosts", {});
     return { ok: true, updated: h.agents.some((agent) => agent.id === v.agent.id), probe };
   });
+  app.post("/api/hosts/ssh", async (req) => {
+    const actor = admin(req);
+    secureRequest(req);
+    return sshDeploy.deploy(sshDeploySchema.parse(req.body), actor);
+  });
   app.post("/api/hosts/pairings", async (req) => {
     const p = admin(req);
     secureRequest(req);
@@ -521,6 +529,7 @@ export async function createApp(options: AppOptions = {}) {
     store.revoke("agent", h.id);
     store.put("host", h.id, { ...h, status: "revoked" });
     remote.revoke(h.id);
+    sshDeploy.remove(h.id);
     store.audit(p, "host.revoke", h.id);
     store.event("", "hosts", {});
     return { ok: true };
@@ -750,6 +759,7 @@ export async function createApp(options: AppOptions = {}) {
   const prune = setInterval(() => store.prune(), 3600000);
   prune.unref();
   app.addHook("preClose", async () => {
+    sshDeploy.close();
     for (const stream of streams) stream.end();
     streams.clear();
     await remote.close();

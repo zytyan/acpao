@@ -473,7 +473,7 @@ func (g *gateway) launch(s *session, config agentConfig, restore bool) error {
 	_ = json.Unmarshal(init.Meta["steering"], &steer)
 	s.Capabilities.Steering = steer.Supported
 	s.ProcessID = cmd.Process.Pid
-	bridge := map[string]any{"name": "acpao", "command": self, "args": []string{"--mcp-bridge"}, "env": []map[string]string{{"name": "ACPAO_CENTER", "value": g.config.Center}, {"name": "ACPAO_TOKEN", "value": token}, {"name": "ACPAO_SSH_JUMP", "value": g.config.SSHJump}, {"name": "ACPAO_SSH_TARGET", "value": g.config.SSHTarget}}}
+	bridge := map[string]any{"name": "acpao", "command": self, "args": []string{"--mcp-bridge"}, "env": []map[string]string{{"name": "ACPAO_CENTER", "value": g.config.Center}, {"name": "ACPAO_CENTER_CERTIFICATE", "value": g.config.CenterCertificate}, {"name": "ACPAO_TOKEN", "value": token}, {"name": "ACPAO_SSH_JUMP", "value": g.config.SSHJump}, {"name": "ACPAO_SSH_TARGET", "value": g.config.SSHTarget}}}
 	params := map[string]any{"cwd": s.Cwd, "mcpServers": []any{bridge}}
 	if restore {
 		if !s.Capabilities.Load {

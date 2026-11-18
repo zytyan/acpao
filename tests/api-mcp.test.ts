@@ -121,6 +121,17 @@ test("HTTP auth, cookie login, origin checks and role boundaries", async (t) => 
     session: s.id,
     host: "local",
   });
+  const sshDeploy = {
+    method: "POST" as const,
+    url: "/api/hosts/ssh",
+    payload: { name: "Test host", target: "-oProxyCommand=unexpected" },
+  };
+  assert.equal((await c.app.inject({
+    ...sshDeploy, headers: { authorization: `Bearer ${token}` },
+  })).statusCode, 403);
+  assert.equal((await c.app.inject({
+    ...sshDeploy, headers: { cookie },
+  })).statusCode, 400);
   assert.equal(
     (
       await c.app.inject({

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,14 +24,15 @@ import (
 )
 
 type config struct {
-	Center        string        `json:"center"`
-	Token         string        `json:"token"`
-	Host          string        `json:"host"`
-	Root          string        `json:"root"`
-	Agents        []agentConfig `json:"agents"`
-	InsecureLocal bool          `json:"insecureLocal"`
-	SSHJump       string        `json:"sshJump,omitempty"`
-	SSHTarget     string        `json:"sshTarget,omitempty"`
+	Center            string        `json:"center"`
+	CenterCertificate string        `json:"centerCertificate,omitempty"`
+	Token             string        `json:"token"`
+	Host              string        `json:"host"`
+	Root              string        `json:"root"`
+	Agents            []agentConfig `json:"agents"`
+	InsecureLocal     bool          `json:"insecureLocal"`
+	SSHJump           string        `json:"sshJump,omitempty"`
+	SSHTarget         string        `json:"sshTarget,omitempty"`
 }
 type gateway struct {
 	config    config
@@ -178,7 +181,11 @@ func (g *gateway) connect(ctx context.Context) error {
 	}
 	u.Path = "/gateway"
 	u.RawQuery = ""
-	dialer := websocket.Dialer{HandshakeTimeout: 15 * time.Second}
+	tlsConfig, err := cTLS(g.config)
+	if err != nil {
+		return err
+	}
+	dialer := websocket.Dialer{HandshakeTimeout: 15 * time.Second, TLSClientConfig: tlsConfig}
 	cleanup := func() {}
 	if g.config.SSHJump != "" {
 		dial, stop, err := startSSHTunnel(ctx, g.config)
@@ -576,12 +583,27 @@ func validateConfig(c config) error {
 		return err
 	}
 	if u.Scheme == "https" {
-		return nil
+		_, err := cTLS(c)
+		return err
 	}
 	if u.Scheme == "http" && c.InsecureLocal && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost") {
 		return nil
 	}
 	return errors.New("Gateway requires HTTPS except explicitly enabled loopback")
+}
+func cTLS(c config) (*tls.Config, error) {
+	if c.CenterCertificate == "" {
+		return nil, nil
+	}
+	center, err := url.Parse(c.Center)
+	if err != nil || center.Scheme != "https" || center.Hostname() != "127.0.0.1" {
+		return nil, errors.New("provisioned TLS certificate requires an HTTPS loopback center")
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM([]byte(c.CenterCertificate)) {
+		return nil, errors.New("invalid center TLS certificate")
+	}
+	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, nil
 }
 func configPath(path string) string {
 	if path != "" {

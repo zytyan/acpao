@@ -17,14 +17,26 @@ import (
 )
 
 func clientFor(ctx context.Context, c config) (*http.Client, func(), error) {
+	tlsConfig, err := cTLS(c)
+	if err != nil {
+		return nil, nil, err
+	}
 	if c.SSHJump == "" {
-		return &http.Client{Timeout: 45 * time.Second}, func() {}, nil
+		client := &http.Client{Timeout: 45 * time.Second}
+		if tlsConfig != nil {
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.TLSClientConfig = tlsConfig
+			client.Transport = transport
+			client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+			return client, transport.CloseIdleConnections, nil
+		}
+		return client, func() {}, nil
 	}
 	dial, stop, err := startSSHTunnel(ctx, c)
 	if err != nil {
 		return nil, nil, err
 	}
-	return &http.Client{Transport: &http.Transport{DialContext: dial}, Timeout: 45 * time.Second}, stop, nil
+	return &http.Client{Transport: &http.Transport{DialContext: dial, TLSClientConfig: tlsConfig}, Timeout: 45 * time.Second}, stop, nil
 }
 func httpJSON(ctx context.Context, client *http.Client, base, token, method, path string, body any) (json.RawMessage, error) {
 	var input io.Reader
@@ -84,7 +96,7 @@ func runMCPBridge() error {
 	if base == "" || token == "" {
 		return errors.New("MCP bridge requires center and session token")
 	}
-	c := config{Center: base, SSHJump: os.Getenv("ACPAO_SSH_JUMP"), SSHTarget: os.Getenv("ACPAO_SSH_TARGET")}
+	c := config{Center: base, CenterCertificate: os.Getenv("ACPAO_CENTER_CERTIFICATE"), SSHJump: os.Getenv("ACPAO_SSH_JUMP"), SSHTarget: os.Getenv("ACPAO_SSH_TARGET")}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	client, stop, err := clientFor(ctx, c)
