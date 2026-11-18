@@ -11,6 +11,7 @@ import {
   type Approval,
   type Command,
 } from "../../../packages/core/src/types.js";
+import { readSlashCommands } from "../../../packages/core/src/slash-commands.js";
 import type * as acp from "@agentclientprotocol/sdk";
 const Hello = z.object({
   type: z.literal("hello"),
@@ -218,11 +219,14 @@ export class RemoteHub {
                     : "completed",
           });
       }
+      if (e.kind === "session.commands.reset" && s) this.store.remove("session-commands", s.id);
       if (e.kind === "acp.update" && s) {
         const { run, update } = e.data as {
           run: string;
           update: acp.SessionUpdate;
         };
+        if (update.sessionUpdate === "available_commands_update")
+          this.store.put("session-commands", s.id, readSlashCommands(update.availableCommands));
         if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text")
           this.store.message(s.id, "assistant", run, update.content.text, true);
         if (update.sessionUpdate === "plan")

@@ -63,22 +63,29 @@ type rpcReply struct {
 		Message string `json:"message"`
 	} `json:"error"`
 }
+type bufferedCommands struct {
+	sessionID string
+	update    json.RawMessage
+}
+
 type acpProcess struct {
-	cmd         *exec.Cmd
-	probe       bool
-	stdin       io.WriteCloser
-	stdout      io.ReadCloser
-	stderr      io.ReadCloser
-	mu          sync.Mutex
-	pending     map[string]chan rpcReply
-	next        int
-	closed      bool
-	session     *session
-	gateway     *gateway
-	active      string
-	queue       []queuedCommand
-	cancelled   bool
-	permissions map[string]chan string
+	updateSessionID string
+	earlyCommands   *bufferedCommands
+	cmd             *exec.Cmd
+	probe           bool
+	stdin           io.WriteCloser
+	stdout          io.ReadCloser
+	stderr          io.ReadCloser
+	mu              sync.Mutex
+	pending         map[string]chan rpcReply
+	next            int
+	closed          bool
+	session         *session
+	gateway         *gateway
+	active          string
+	queue           []queuedCommand
+	cancelled       bool
+	permissions     map[string]chan string
 }
 
 func (p *acpProcess) send(value any) error {
@@ -145,8 +152,8 @@ func (p *acpProcess) listen() {
 				SessionID string          `json:"sessionId"`
 				Update    json.RawMessage `json:"update"`
 			}
-			if json.Unmarshal(msg.Params, &params) == nil && params.SessionID == p.session.ACPID {
-				p.gateway.emit(p.session.ID, "acp.update", map[string]any{"run": p.currentRun(), "update": params.Update})
+			if json.Unmarshal(msg.Params, &params) == nil {
+				p.sessionUpdate(params.SessionID, params.Update)
 			}
 			continue
 		}
@@ -190,14 +197,46 @@ func (p *acpProcess) listen() {
 	}
 	p.mu.Unlock()
 }
-func (p *acpProcess) currentRun() string {
+func (p *acpProcess) sessionUpdate(sessionID string, update json.RawMessage) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.active == "" {
-		return "history"
+	if p.closed || sessionID == "" {
+		return
 	}
-	return p.active
+	if p.updateSessionID == "" {
+		var kind struct {
+			Update string `json:"sessionUpdate"`
+		}
+		if json.Unmarshal(update, &kind) == nil && kind.Update == "available_commands_update" {
+			p.earlyCommands = &bufferedCommands{sessionID: sessionID, update: update}
+		}
+		return
+	}
+	if sessionID != p.updateSessionID {
+		return
+	}
+	p.emitUpdate(update)
 }
+
+// Call while holding p.mu to preserve notification order across session/new.
+func (p *acpProcess) emitUpdate(update json.RawMessage) {
+	run := p.active
+	if run == "" {
+		run = "history"
+	}
+	p.gateway.emit(p.session.ID, "acp.update", map[string]any{"run": run, "update": update})
+}
+
+func (p *acpProcess) bindUpdateSession(sessionID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.updateSessionID = sessionID
+	if value := p.earlyCommands; value != nil && value.sessionID == sessionID {
+		p.emitUpdate(value.update)
+	}
+	p.earlyCommands = nil
+}
+
 func (p *acpProcess) permission(id json.RawMessage, raw json.RawMessage) {
 	var params map[string]any
 	if json.Unmarshal(raw, &params) != nil {
@@ -446,6 +485,10 @@ func (g *gateway) launchAgent(s *session, config agentConfig, restore, probe boo
 		g.mu.Lock()
 		g.processes[s.ID] = p
 		g.mu.Unlock()
+		if restore {
+			p.bindUpdateSession(s.ACPID)
+		}
+		g.emit(s.ID, "session.commands.reset", nil)
 	} else {
 		defer p.stop()
 	}
@@ -520,6 +563,9 @@ func (g *gateway) launchAgent(s *session, config agentConfig, restore, probe boo
 		s.ACPID = response.SessionID
 		if err == nil && s.ACPID == "" {
 			err = errors.New("ACP Agent did not return a session ID")
+		}
+		if err == nil && !probe {
+			p.bindUpdateSession(response.SessionID)
 		}
 	}
 	if err != nil {

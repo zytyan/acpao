@@ -1,3 +1,5 @@
+import type { SlashCommand } from "../../../packages/core/src/slash-commands";
+
 export interface Agent {
   id: string;
   name: string;
@@ -54,6 +56,7 @@ export interface ChatData {
     status: string;
     agent: string;
   }[];
+  slashCommands?: SlashCommand[];
   queued?: number;
   queuedCommands?: { id: string; text: string }[];
 }

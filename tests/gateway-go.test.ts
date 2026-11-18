@@ -99,6 +99,11 @@ test(
     ).catch(() => {
       throw new Error(stderr);
     });
+    const readCommands = async () =>
+      (await c.app.inject({ url: `/api/sessions/${session.id}`, headers })).json().slashCommands;
+    const commands = await until(readCommands, (value) => value.some((command: { name: string }) => command.name === "mcp"));
+    assert.ok(commands.some((command: { name: string; inputHint: string }) =>
+      command.name === "delegate" && command.inputHint === "工作内容"));
     const diagnostic = await until(
       () => c.store.diagnostics().find((entry) => entry.message.includes("remote stderr sentinel")),
       (entry) => !!entry,
@@ -216,6 +221,12 @@ test(
     });
     assert.equal(c.store.messages(session.id).filter((m) => m.role === "user").length, 4);
     assert.ok(c.store.host(identity.host).agents.some(a => a.id === remoteAgent.id));
+    await until(readCommands, (value) => value.some((command: { name: string }) => command.name === "mcp"));
+    await c.orchestration.send({ session: session.id, text: "/mcp" }, owner);
+    await until(
+      () => c.store.messages(session.id).some((message) => message.role === "assistant" && message.body.includes("MCP 服务：acpao")),
+      Boolean,
+    );
     const finalChild = child;
     finalChild.kill();
     await new Promise<void>((done) => finalChild.once("exit", () => done()));

@@ -5,6 +5,7 @@ import { realpath, stat } from "node:fs/promises";
 import { resolve, relative, isAbsolute } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { readSlashCommands } from "./slash-commands.js";
 import { Store, id } from "./store.js";
 import { prepareAgentSpawn } from "./agent-spawn.js";
 import { agentEnvironment } from "./agent-command.js";
@@ -163,6 +164,7 @@ export class Runtime {
         429,
       );
     const s = this.store.session(key);
+    this.store.remove("session-commands", key);
     this.store.updateSession(key, { status: "creating", error: undefined });
     this.store.diagnostic({
       level: "info",
@@ -365,6 +367,8 @@ export class Runtime {
     if (slot?.stopping) return;
     const run = slot?.active ?? "history";
     this.store.transaction(() => {
+      if (update.sessionUpdate === "available_commands_update")
+        this.store.put("session-commands", key, readSlashCommands(update.availableCommands));
       if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text")
         this.store.message(key, "assistant", run, update.content.text, true);
       if (update.sessionUpdate === "tool_call")

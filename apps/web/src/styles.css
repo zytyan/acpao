@@ -1197,12 +1197,63 @@ select {
   padding: 0 38px 24px;
 }
 .composer {
+  position: relative;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
   box-shadow: 0 3px 18px #00000004;
   padding: 14px 15px 10px;
   transition: border-color 0.15s;
+}
+.slash-menu {
+  position: absolute;
+  inset: auto 0 calc(100% + 8px);
+  z-index: 4;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  border-radius: 10px;
+  padding: 6px;
+}
+.slash-menu-heading {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 5px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.slash-menu [role="listbox"] {
+  max-height: min(290px, 38vh);
+  overflow-y: auto;
+}
+.slash-menu button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  text-align: left;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.slash-menu button:hover,
+.slash-menu button[aria-selected="true"] {
+  background: var(--hover);
+}
+.slash-menu button code {
+  color: var(--shell-parameter);
+  font-weight: 600;
+}
+.slash-menu button span {
+  color: var(--muted);
+}
+.slash-menu button small {
+  margin-inline-start: 8px;
+  color: var(--muted);
 }
 .composer:focus-within {
   border-color: var(--muted);

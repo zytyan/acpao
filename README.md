@@ -44,6 +44,8 @@ Agent 仅继承 `PATH`、`HOME`、`LANG`、`TERM` 以及显式配置的环境变
 
 执行端支持稳定 ACP v1 的初始化、`session/new`、`session/prompt`、`session/update`、`session/request_permission`、`session/cancel`，以及协商成功后的 `session/load`。SDK 2.7.0 使用 `client()/agent()` 和 `methods`，没有依赖被移除的旧连接类。每个 Session 使用独立进程，因此跨会话 ID 不会混用，也不假定 Agent 支持同进程并行。
 
+在本机或远程会话输入 `/`，即可查看该 Agent 通过 ACP 公布的斜杠命令和参数提示。用 Tab 补全，或用上下键选中后按 Enter 插入，再发送给 Agent。也可以直接输入完整命令，例如 `/mcp`；命令能否执行由当前 ACP Agent 决定。
+
 主 Agent 的 `session/new` 自动附加 `acpao` stdio MCP 桥。它获得独立、可撤销、限制到当前主机及自身/委派后代会话的凭据。**Agent 无权添加主机、改启动程序、导出密钥或审批。** 跨主机委派暂需人类直接创建目标 Session；MVP 不默认授予 Agent 全局主机权限。
 
 ## 不依赖模型的体验与测试

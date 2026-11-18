@@ -25,6 +25,7 @@ import {
 } from "../../../packages/core/src/types.js";
 import { RemoteHub } from "./remote.js";
 import { findAgentExecutable } from "../../../packages/core/src/agent-spawn.js";
+import type { SlashCommand } from "../../../packages/core/src/slash-commands.js";
 import { probeAgent } from "./probe.js";
 import { SshDeploy, sshDeploySchema } from "./ssh-deploy.js";
 export interface AppOptions {
@@ -578,6 +579,7 @@ export async function createApp(options: AppOptions = {}) {
     return {
       session: store.session(key),
       messages: store.messages(key, query.before),
+      slashCommands: store.get<SlashCommand[]>("session-commands", key) ?? [],
       approvals: store.approvals(key),
       queued: store.commands(key, "queued").length,
       queuedCommands: store.commands(key, "queued").map((c) => ({ id: c.id, text: c.text })),

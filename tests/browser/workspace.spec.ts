@@ -30,6 +30,13 @@ test("login → bootstrap → streamed workspace → delegation → approval →
   await expect(page.locator(".message.assistant")).toContainText("收到：检查本地完整链路");
   await expect(page.locator(".chat-meta .status")).toHaveText("已完成");
   await expect(page.locator(".markdown input[type=checkbox]").first()).toBeChecked();
+  await input.fill("/m");
+  await expect(page.getByRole("listbox", { name: "Agent 斜杠命令" }).getByRole("option")).toContainText("/mcp");
+  await input.press("Tab");
+  await expect(input).toHaveValue("/mcp");
+  await input.press("Enter");
+  await expect(page.locator(".message.assistant").last()).toContainText("MCP 服务：acpao");
+  await expect(page.locator(".chat-meta .status")).toHaveText("已完成");
   await input.fill("/permission 写入测试");
   await input.press("Enter");
   await expect(page.getByText("Agent 需要你的确认")).toBeVisible();

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type FormEvent } from "react";
+import type { SlashCommand } from "../../../packages/core/src/slash-commands";
 import {
   ArrowUp,
   ArrowUpRight,
@@ -78,6 +79,8 @@ export default function App() {
     [detected, setDetected] = useState<Agent[]>([]),
     [working, setWorking] = useState(false),
     [text, setText] = useState(""),
+    [slashIndex, setSlashIndex] = useState(-1),
+    [dismissedSlash, setDismissedSlash] = useState<string | null>(null),
     [hostId, setHostId] = useState("local"),
     [agentId, setAgentId] = useState(""),
     [cwd, setCwd] = useState(""),
@@ -115,10 +118,29 @@ export default function App() {
       : null;
   const activeRef = useRef(sessionId);
   const moreMenu = useRef<HTMLDetailsElement>(null);
+  const composerInput = useRef<HTMLTextAreaElement>(null);
   activeRef.current = sessionId;
   const host = hosts.find((h) => h.id === hostId);
   const agentHost = hosts.find((h) => h.id === agentHostId);
   const currentSession = sessions.find((s) => s.id === sessionId);
+  const composerDisabled = ["closed", "interrupted", "error", "creating"].includes(
+    currentSession?.status ?? "creating",
+  );
+  const slashPrefix = /^\/([^\s]*)$/u.exec(text)?.[1];
+  const slashMatches =
+    !composerDisabled && slashPrefix !== undefined && dismissedSlash !== text && chat?.session.id === sessionId
+      ? (chat?.slashCommands ?? [])
+          .filter((command) => command.name.toLowerCase().startsWith(slashPrefix.toLowerCase()))
+          .slice(0, 8)
+      : [];
+  const activeSlash = slashMatches[slashIndex];
+  const chooseSlash = (command: SlashCommand) => {
+    const input = `/${command.name}${command.inputHint ? " " : ""}`;
+    setText(input);
+    setDismissedSlash(input);
+    setSlashIndex(-1);
+    composerInput.current?.focus();
+  };
   const isWorkspace = route === "/workspace";
   const pairCenterOrigin = (() => {
     try { return new URL(pairCenter).origin; } catch { return ""; }
@@ -262,6 +284,8 @@ export default function App() {
   useEffect(() => {
     setChat(null);
     setText("");
+    setDismissedSlash(null);
+    setSlashIndex(-1);
     setOlder(false);
     if (sessionId) void refreshChat();
   }, [sessionId, refreshChat]);
@@ -902,8 +926,33 @@ export default function App() {
                 </div>
               ))}
               <form className="composer" onSubmit={(e) => void send(e)}>
+                {slashMatches.length > 0 && (
+                  <div className="slash-menu">
+                    <div className="slash-menu-heading">Agent 命令 <span>↑ ↓ 选择 · Tab 补全</span></div>
+                    <div role="listbox" aria-label="Agent 斜杠命令" id="composer-slash-commands">
+                      {slashMatches.map((command, index) => (
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={slashIndex === index}
+                          id={`composer-slash-${index}`}
+                          key={command.name}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => chooseSlash(command)}
+                        >
+                          <code>/{command.name}</code>
+                          <span>{command.description}{command.inputHint && <small>{command.inputHint}</small>}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <textarea
+                  ref={composerInput}
                   aria-label="发送给 Agent 的指令"
+                  aria-autocomplete="list"
+                  aria-controls={slashMatches.length ? "composer-slash-commands" : undefined}
+                  aria-activedescendant={activeSlash ? `composer-slash-${slashIndex}` : undefined}
                   placeholder={
                     busy(currentSession?.status)
                       ? "补充要求… 发送后会排队等待当前工作结束"
@@ -911,16 +960,39 @@ export default function App() {
                   }
                   value={text}
                   rows={2}
-                  onChange={(e) => setText(e.target.value)}
+                  onChange={(e) => {
+                    setText(e.target.value);
+                    setDismissedSlash(null);
+                    setSlashIndex(-1);
+                  }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    if (e.nativeEvent.isComposing) return;
+                    if (slashMatches.length) {
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setDismissedSlash(text);
+                        return;
+                      }
+                      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                        e.preventDefault();
+                        const direction = e.key === "ArrowDown" ? 1 : -1;
+                        setSlashIndex((index) => index < 0
+                          ? direction === 1 ? 0 : slashMatches.length - 1
+                          : (index + direction + slashMatches.length) % slashMatches.length);
+                        return;
+                      }
+                      if (!e.shiftKey && (e.key === "Tab" || (e.key === "Enter" && activeSlash))) {
+                        e.preventDefault();
+                        chooseSlash(activeSlash ?? slashMatches[0]!);
+                        return;
+                      }
+                    }
+                    if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       void send();
                     }
                   }}
-                  disabled={["closed", "interrupted", "error", "creating"].includes(
-                    currentSession?.status ?? "creating",
-                  )}
+                  disabled={composerDisabled}
                 />
                 <div className="composer-bottom">
                   <span title={currentSession?.cwd}>
