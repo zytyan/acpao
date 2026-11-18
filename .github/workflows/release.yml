@@ -37,6 +37,10 @@ jobs:
           cache-dependency-path: apps/gateway-go/go.sum
       - run: npm ci
       - run: npm run build:binary
+      - name: Test Windows Gateway batch wrappers
+        if: runner.os == 'Windows'
+        working-directory: apps/gateway-go
+        run: go test -run '^TestWindowsBatchAgent$' .
       - name: Smoke test executable
         shell: bash
         run: |

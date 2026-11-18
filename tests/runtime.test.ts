@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { dirname, resolve } from "node:path";
 import { symlink } from "node:fs/promises";
-import { setup, until, owner } from "./helpers.js";
+import { setup, until, owner, adminToken } from "./helpers.js";
 import type { Command } from "../packages/core/src/types.js";
 const create = async (c: Awaited<ReturnType<typeof setup>>, title = "新的工作") =>
   c.orchestration.create({ cwd: c.root, agent: "mock", title }, owner);
@@ -263,15 +263,26 @@ test("Git worktree opt-in isolates edits while keeping the source repository int
   assert.equal(await readFile(resolve(c.root, "baseline.txt"), "utf8"), "original\n");
 });
 
-test("Windows launches a quoted CMD ACP wrapper", { skip: process.platform !== "win32" }, async (t) => {
-  const { writeFile } = await import("node:fs/promises");
-  const c = await setup(t);
-  const wrapper = resolve(c.root, "ACP wrapper.cmd");
-  await writeFile(wrapper, `@"${process.execPath}" "${resolve("scripts/mock-agent.mjs")}" %*\r\n`);
-  const host = c.store.host("local");
-  const agent = { id: "cmd-wrapper", name: "CMD ACP", command: wrapper.replaceAll("\\", "/"),
-    args: ["a value with spaces"], env: {} };
-  c.store.put("host", host.id, { ...host, agents: [...host.agents, agent] });
-  const session = await c.orchestration.create({ cwd: c.root, agent: agent.id }, owner);
-  assert.equal(session.status, "idle");
-});
+for (const extension of ["cmd", "bat"]) {
+  test(`Windows tests and launches a quoted .${extension} ACP wrapper`,
+    { skip: process.platform !== "win32" }, async (t) => {
+      const { writeFile } = await import("node:fs/promises");
+      const c = await setup(t);
+      const wrapper = resolve(c.root, `ACP wrapper.${extension}`);
+      await writeFile(wrapper, [
+        '@if not "%~1"=="a value with spaces" exit /b 87',
+        `@"${process.execPath}" "${resolve("scripts/mock-agent.mjs")}" %*`,
+        "",
+      ].join("\r\n"));
+      const agent = { id: `wrapper-${extension}`, name: `.${extension} ACP`, command: wrapper.replaceAll("\\", "/"),
+        args: ["a value with spaces"], env: {} };
+      const result = await c.app.inject({
+        method: "POST", url: "/api/hosts/local/agent",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { agent },
+      });
+      assert.equal(result.json().ok, true, result.body);
+      const session = await c.orchestration.create({ cwd: c.root, agent: agent.id }, owner);
+      assert.equal(session.status, "idle");
+    });
+}

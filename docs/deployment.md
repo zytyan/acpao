@@ -56,6 +56,8 @@ SSH 服务端需要允许反向 TCP 转发，使用 `GatewayPorts no` 或 `clien
 
 部署文件位于远程 SSH 用户家目录下的 `.acpao/gateways/<主机 ID>/`，工作根目录默认是该用户的家目录。平台会尝试发现该账户 PATH 内的 `codex-acp` 和 `opencode`。其他 Agent 先以运行 Gateway 的用户完成安装与登录，再从「主机 → 远程主机 → 添加 Agent」填写启动命令（例如 `opencode acp`）并测试。Gateway 在远端打开 ACP 会话验证后保存配置。旧版 Gateway 仍可编辑 `state/config.json` 后按原方式重启，升级后可使用界面。
 
+Windows 上可以填写 `.cmd` 或 `.bat` 启动程序。带空格的路径和参数请加引号。如果参数包含 CMD 特殊字符，请使用真实的 `.exe`，或用 `node.exe` 直接启动 ACP JavaScript 适配器。
+
 ### 手动添加
 
 目标主机下载 Release 中匹配平台的 `acpao-gateway-*` 可执行文件。`--config` 可指定配置文件路径，默认 `.gateway/config.json`。设备配置目录与 `gateway-go.sqlite` 必须持久保存；Agent 自身的安装与登录资料需另行保存。

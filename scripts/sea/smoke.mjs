@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
@@ -48,6 +48,34 @@ try {
   if (!created.ok) throw new Error(`ACP Session failed: ${created.status} ${await created.text()} ${output}`);
   const session = await created.json();
   if (!session.id || !session.acpId) throw new Error("ACP Session IDs missing");
+  if (process.platform === "win32") {
+    for (const extension of ["cmd", "bat"]) {
+      const wrapper = resolve(data, `ACP wrapper.${extension}`);
+      await writeFile(wrapper, [
+        '@if not "%~1"=="argument with spaces" exit /b 87',
+        `@"${binary}"`,
+        "",
+      ].join("\r\n"));
+      const agent = {
+        id: `smoke-${extension}`, name: `Standalone .${extension}`,
+        command: wrapper.replaceAll("\\", "/"),
+        args: ["argument with spaces"], env: { ACPAO_SEA_MODE: "mock-agent" },
+      };
+      const headers = { cookie, "content-type": "application/json" };
+      const saved = await fetch(`http://127.0.0.1:${port}/api/hosts/local/agent`, {
+        method: "POST", headers, body: JSON.stringify({ agent }),
+      });
+      const configuration = await saved.json();
+      if (!saved.ok || !configuration.ok)
+        throw new Error(`Standalone .${extension} probe failed: ${JSON.stringify(configuration)}`);
+      const launched = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+        method: "POST", headers, body: JSON.stringify({ agent: agent.id, cwd: data }),
+      });
+      if (!launched.ok || !(await launched.json()).acpId)
+        throw new Error(`Standalone .${extension} session failed: ${launched.status}`);
+      console.log(`Standalone Windows .${extension} ACP wrapper passed`);
+    }
+  }
   const acpClient = acp.client({ name: "standalone-smoke" }).connect(
     createHttpStream(`http://127.0.0.1:${port}/acp`, { headers: { Authorization: `Bearer ${token}` } }),
   );
@@ -68,5 +96,5 @@ try {
 } finally {
   child.kill();
   if (child.exitCode === null) await new Promise((done) => child.once("exit", done));
-  await rm(data, { recursive: true, force: true });
+  await rm(data, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
