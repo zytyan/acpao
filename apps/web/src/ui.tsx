@@ -41,11 +41,13 @@ export function Modal({
   children,
   onClose,
   backdropClose = true,
+  canClose = true,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   backdropClose?: boolean;
+  canClose?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -54,14 +56,17 @@ export function Modal({
   return (
     <dialog
       ref={ref}
-      onCancel={onClose}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (canClose) onClose();
+      }}
       onClick={(e) => {
-        if (backdropClose && e.target === ref.current) onClose();
+        if (canClose && backdropClose && e.target === ref.current) onClose();
       }}
     >
       <div className="modal-head">
         <h2>{title}</h2>
-        <button className="icon-button" aria-label="关闭弹窗" onClick={onClose}>
+        <button className="icon-button" aria-label="关闭弹窗" onClick={onClose} disabled={!canClose}>
           <X size={18} />
         </button>
       </div>

@@ -44,9 +44,21 @@ Dockerfile 提供可选 Node 镜像入口，默认普通 `node` 用户。镜像�
 
 ## Gateway
 
+### 通过 SSH 添加
+
+在「主机 → 配对主机 → 通过 SSH 添加」填写远程主机的 SSH 别名或 `user@host`。中心使用运行该服务的账户的 OpenSSH 配置、密钥或 ssh-agent。首次使用前，请从中心机器核对目标与跳板的主机指纹，并保存到该账户的 `known_hosts`。可选的 `ACPAO_SSH_CONFIG` 指定中心使用的 SSH 配置文件。
+
+中心自动识别 Linux x64、Linux ARM64 或 Windows x64，从当前中心二进制解压对应 Gateway 并通过 SSH 上传。远程机器无需访问 GitHub，也无需 Node.js 或 zstd。用于编译中心二进制的 Node.js 与 Go 只需要在构建机器上可用。源码开发模式可先运行 `npm run build:gateway-assets`。
+
+SSH 服务端需要允许反向 TCP 转发，使用 `GatewayPorts no` 或 `clientspecified`。中心只转发 Gateway 用到的接口，并自动生成和固定隧道内部的 TLS 证书。中心可以维持默认的本机 HTTP 地址，无需公网 HTTPS 或证书。中心重启会从 SQLite 重新建立隧道。已完全离线的 Gateway 继续执行本地工作，连接恢复后补发事件。
+
+部署文件位于远程 SSH 用户家目录下的 `.acpao/gateways/<主机 ID>/`，工作根目录默认是该用户的家目录。平台会尝试发现该账户 PATH 内的 `codex-acp` 和 `opencode`。其他 Agent 可编辑 `state/config.json` 后重启 Gateway。Agent 仍需在远程主机自行安装和登录。
+
+### 手动添加
+
 目标主机下载 Release 中匹配平台的 `acpao-gateway-*` 可执行文件。`--config` 可指定配置文件路径，默认 `.gateway/config.json`。设备配置目录与 `gateway-go.sqlite` 必须持久保存；Agent 自身的安装与登录资料需另行保存。
 
-首次配对需要先通过中心 UI 生成一次性配对码，并填入目标主机可访问的中心 HTTPS 地址；不要把中心管理员密钥复制给 Gateway。SSH 自动上传、安装 Agent 和远程登录 UI 尚未实现；目前由人类通过 SSH 或目标设备终端执行明确命令。Gateway 状态目录在 Unix 下限制为 0700；Windows 下通过系统 `icacls` 限制继承和当前用户权限。自定义 `--config` 路径应放在专用目录中。
+手动配对需要先通过中心 UI 生成一次性配对码，并填入目标主机可访问的中心 HTTPS 地址。Gateway 状态目录在 Unix 下限制为 0700；Windows 下通过系统 `icacls` 限制继承和当前用户权限。自定义 `--config` 路径应放在专用目录中。
 
 普通主机可运行 `acpao-gateway-linux-x64 --daemon`：命令返回终端，后台 manager 监视 worker 并在退出后重启。`--stop` 结束后台 manager；`--manager` 用于前台诊断。Docker 容器内使用 `--foreground`，由容器 restart policy 管理整个进程。跳板连接可在配对时设置 `ACPAO_SSH_JUMP` 和 `ACPAO_SSH_TARGET`，Gateway 使用系统 `ssh -J` 建立本地转发，HTTPS/TLS 仍按中心原域名校验。该模式要求 SSH 密钥、已信任的主机指纹和目标机器上的 `ssh` 命令预先可用。不要把凭据写进启动参数和日志。
 
@@ -63,4 +75,4 @@ Dockerfile 提供可选 Node 镜像入口，默认普通 `node` 用户。镜像�
 
 ## 当前验证范围
 
-实际验证了本机独立中心/网关进程间协议与回放；远端 Linux 实机、公开证书反代和 Docker 部署尚未现场验证。这些配置是可复用的部署入口，不能视作已完成环境验收。
+Linux x64 已用独立 OpenSSH 服务验证中心二进制上传内置 Gateway、本地 HTTP 中心搭建反向隧道以及中心重启后的事件恢复。SSH 部署到 Windows 与 Linux ARM64 已完成交叉构建，仍需目标实机验收。

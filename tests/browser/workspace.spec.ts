@@ -64,6 +64,8 @@ test("login → bootstrap → streamed workspace → delegation → approval →
   await page.getByRole("link", { name: "主机", exact: true }).click();
   await expect(page.getByRole("heading", { name: "工作，在你的设备上发生。" })).toBeVisible();
   await page.getByRole("button", { name: "配对主机" }).click();
+  await expect(page.getByLabel("SSH 主机")).toBeVisible();
+  await page.getByRole("button", { name: "手动配对" }).click();
   await page.getByLabel("主机名称").fill("Linux 测试主机");
   await page.getByRole("button", { name: "生成一次性配对码" }).click();
   await expect(page.locator(".pair-result pre")).toContainText("ACPAO_PAIR_CODE");

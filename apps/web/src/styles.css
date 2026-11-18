@@ -2186,3 +2186,35 @@ code,
 pre {
   font-family: "SFMono-Regular", Consolas, "Noto Sans SC Variable", monospace;
 }
+
+.pair-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.pair-modes .button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ssh-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ssh-options {
+  margin-block: 14px;
+}
+
+.ssh-options summary {
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+
+.ssh-fields [role="alert"] {
+  color: var(--danger);
+}

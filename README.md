@@ -84,6 +84,10 @@ MCP 提供 Streamable HTTP `/mcp`；ACP 客户端可通过 Streamable HTTP `/acp
 
 ## Remote Gateway
 
+能从中心 SSH 登录目标时，用「主机 → 配对主机 → 通过 SSH 添加」。中心可执行文件内置三种平台的压缩 Gateway，自动识别、上传并启动；中心管理反向 SSH 隧道，无需配置公网 HTTPS。SSH 指纹核验和服务端转发要求见 [通过 SSH 添加](docs/deployment.md#通过-ssh-添加)。
+
+手动配对适用于只能由目标设备主动建立连接的场景：
+
 1. 给中心配置可达的 **HTTPS** 地址和 TLS 反向代理，参见 [部署说明](docs/deployment.md)。
 2. 在「主机 → 配对主机」生成一次性配对码，10 分钟有效、仅能使用一次。
 3. 在远端下载匹配平台的 `acpao-gateway-*` 二进制，不需要 Node.js；被管理的 ACP Agent 本身可能另有运行时要求。

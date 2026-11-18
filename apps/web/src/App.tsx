@@ -79,6 +79,10 @@ export default function App() {
     [title, setTitle] = useState(""),
     [isolate, setIsolate] = useState(false),
     [pairName, setPairName] = useState(""),
+    [pairMode, setPairMode] = useState<"ssh" | "manual">("ssh"),
+    [sshPending, setSshPending] = useState(false),
+    [sshError, setSshError] = useState(""),
+    [sshResult, setSshResult] = useState<{ online: boolean } | null>(null),
     [pairCenter, setPairCenter] = useState(location.origin),
     [pairPlatform, setPairPlatform] = useState<"linux-x64" | "linux-arm64" | "windows-x64">("linux-x64"),
     [pair, setPair] = useState<{ code: string; host: string } | null>(null),
@@ -1029,6 +1033,9 @@ export default function App() {
                 className="button primary"
                 onClick={() => {
                   setPair(null);
+                  setPairMode("ssh");
+                  setSshResult(null);
+                  setSshError("");
                   setModal("pair");
                 }}
               >
@@ -1292,12 +1299,61 @@ export default function App() {
       {modal === "pair" && (
         <Modal
           title="配对远程主机"
+          backdropClose={false}
+          canClose={!sshPending}
           onClose={() => {
             setModal(null);
             setPair(null);
           }}
         >
-          {!pair ? (
+          {!pair && !sshResult && (
+            <div className="pair-modes" role="group" aria-label="连接方式">
+              <button type="button" className="button" aria-pressed={pairMode === "ssh"} disabled={sshPending} onClick={() => setPairMode("ssh")}>通过 SSH 添加</button>
+              <button type="button" className="button" aria-pressed={pairMode === "manual"} disabled={sshPending} onClick={() => setPairMode("manual")}>手动配对</button>
+            </div>
+          )}
+          {pairMode === "ssh" ? sshResult ? (
+            <div className="pair-result">
+              <p role="status">{sshResult.online ? "Gateway 已安装并连接。" : "Gateway 已启动，中心正在重试连接。请检查 SSH 服务端是否允许反向端口转发。"}</p>
+              <button className="button primary" onClick={() => setModal(null)}>完成</button>
+            </div>
+          ) : (
+            <form onSubmit={(event) => {
+              event.preventDefault();
+              const values = new FormData(event.currentTarget);
+              const get = (key: string) => String(values.get(key) ?? "").trim();
+              setSshError("");
+              setSshPending(true);
+              void api<{ online: boolean }>("/hosts/ssh", {
+                name: pairName,
+                target: get("target"),
+                ...(get("port") ? { port: Number(get("port")) } : {}),
+                jump: get("jump") || undefined,
+                root: get("root") || undefined,
+              }).then((result) => {
+                setSshResult(result);
+                void refresh();
+              }).catch((error: Error) => setSshError(error.message))
+                .finally(() => setSshPending(false));
+            }}>
+              <fieldset className="ssh-fields" disabled={sshPending}>
+                <p className="modal-description">中心会上传内置 Gateway，并维持 SSH 隧道。无需给中心配置 HTTPS。</p>
+                <label>主机名称<input value={pairName} onChange={(event) => setPairName(event.target.value)} required maxLength={100} placeholder="例如：开发服务器" /></label>
+                <label>SSH 主机<input name="target" placeholder="例如：devbox 或 dev@10.0.0.12" required maxLength={255} /></label>
+                <p className="hint">使用中心账户的 SSH 密钥或 ssh-agent。首次连接请在中心机器核对并保存 SSH 主机指纹。</p>
+                <details className="ssh-options">
+                  <summary>连接选项</summary>
+                  <label>SSH 端口<input name="port" inputMode="numeric" type="number" min="1" max="65535" placeholder="使用 SSH 配置" /></label>
+                  <label>SSH 跳板<input name="jump" maxLength={255} placeholder="例如：bastion" /></label>
+                  <label>远程工作目录<input name="root" maxLength={1024} placeholder="默认使用远程用户的家目录" /></label>
+                </details>
+                {sshError && <p role="alert" className="hint">{sshError}</p>}
+                <div className="form-actions">
+                  <button className="button primary">{sshPending ? "正在上传并连接…" : "上传并连接"}{sshPending ? <LoaderCircle size={15} className="spin" /> : <ArrowUpRight size={15} />}</button>
+                </div>
+              </fieldset>
+            </form>
+          ) : !pair ? (
             <form
               onSubmit={(e) => {
                 e.preventDefault();

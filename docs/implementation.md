@@ -24,7 +24,7 @@ Go Gateway 为独立可执行文件，支持 Linux x64、Linux ARM64、Windows x
 
 诊断页提供可查询的结构化日志、测试 Agent 开关和受监督模式下的重启入口。日志按 180 天与 10 万条上限保留。Agent 进程退出后，本地会话仅在其真实支持 `session/load` 时尝试自动恢复；正在执行的 Prompt 不重放。Windows Release 的 `acpao-open-windows-x64.exe` 是 GUI 子系统启动器，不留控制台；中心 CLI 程序仍可在无浏览器环境打印授权 URL。Release 同时提供三平台中心、Gateway 与启动器二进制。
 
-当前仍需人工完成远端 Gateway 下载与首次配对、ACP Agent 安装/登录。SSH 自动部署和 Web 内 Agent 登录尚未实现。Docker 镜像、公开证书部署和长期压力测试尚未在本环境验收。ACP 权限请求不是 OS 沙箱，部署时仍需使用合适的系统账户或容器隔离。
+中心的自包含二进制随附 Zstandard 压缩的 Linux x64、Linux ARM64 和 Windows x64 Gateway。主机页可通过 SSH 识别目标平台、上传并启动 Gateway；中心托管的反向隧道采用固定证书，支持中心只提供本机 HTTP。无法从中心 SSH 登录的主机仍可通过手动命令配对。Agent 安装/登录需在目标设备完成。ACP 权限请求不是 OS 沙箱，部署时仍需使用合适的系统账户或容器隔离。
 
 ## 验证记录
 
